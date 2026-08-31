@@ -26,11 +26,10 @@ type Project struct {
 	Remarks      string `json:"remarks"`
 }
 
-// Status computes Active vs Pending
+// Status computes Active vs Pending - Active when start date is set
 func (p *Project) Status() string {
 	s := p.EffectiveStart()
-	e := p.EffectiveEnd()
-	if s != "" && e != "" {
+	if s != "" {
 		return "Active"
 	}
 	return "Pending"
@@ -70,7 +69,7 @@ type Employee struct {
 	EmpID         string `json:"empId"`
 	NameEn        string `json:"nameEn"`
 	NameAr        string `json:"nameAr"`
-	Project       string `json:"project"` // Category: DEMI, Expansion Joint, EDG, COA, All
+	Project       string `json:"project"` // Category: DEMI, Expansion Joint, EDG, COA, Oil Spill, All
 	Team          string `json:"team"`    // Team: A, B, C, D, E, F, G, H, I, K, M, -
 	JobCat        string `json:"jobCat"`
 	VehicleType   string `json:"vehicleType"`
@@ -91,17 +90,23 @@ func (e *Employee) IsNeed() bool {
 
 // CategoryMap mirrors the Project Code -> Category mapping
 var CategoryMap = map[string]string{
-	"Demi":       "DEMI",
-	"EXJ":        "Expansion Joint",
-	"EDG":        "EDG",
-	"COA":        "COA",
-	"Oill Spill": "All",
+	"Demi":        "DEMI",
+	"EXJ":         "Expansion Joint",
+	"EDG":         "EDG",
+	"COA":         "COA",
+	"Oil Spill":   "Oil Spill",
+	"Oill Spill":  "Oil Spill",
+	"Oil":         "Oil Spill",
+	"Oill":        "Oil Spill",
 }
 
 func GetCategory(code string) string {
 	code = strings.TrimSpace(code)
 	if cat, ok := CategoryMap[code]; ok {
 		return cat
+	}
+	if code != "" {
+		return code
 	}
 	return "All"
 }

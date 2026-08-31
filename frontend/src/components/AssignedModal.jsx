@@ -92,8 +92,7 @@ export default function AssignedModal({ projectId, projectName, onClose }) {
 
               {!data.assigned || data.assigned.length === 0 ? (
                 <div className="am-empty">
-                  This project is <strong>Pending</strong>. Set start &amp; end
-                  dates to activate and assign teams.
+                  This project is <strong>Pending</strong>. Set a start date to activate and assign teams.
                 </div>
               ) : (
                 <div className="am-table-wrapper">

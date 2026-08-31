@@ -14,6 +14,8 @@ const categoryColors = {
   'Expansion Joint': '#6c5ce7',
   EDG: '#28a745',
   COA: '#e08c00',
+  'Oil Spill': '#00b894',
+  'Oil': '#00b894',
   All: '#00b894',
 }
 
@@ -22,11 +24,16 @@ const CATEGORY_MAP = {
   EXJ: 'Expansion Joint',
   EDG: 'EDG',
   COA: 'COA',
-  'Oill Spill': 'All',
+  'Oil Spill': 'Oil Spill',
+  'Oill Spill': 'Oil Spill',
+  'Oil': 'Oil Spill',
+  'Oill': 'Oil Spill',
 }
 
 function getCategory(code) {
-  return CATEGORY_MAP[code?.trim()] || 'All'
+  if (!code) return 'All'
+  const trimmed = code.trim()
+  return CATEGORY_MAP[trimmed] || trimmed || 'All'
 }
 
 // Auto-calculate date 5 days before given date
@@ -51,12 +58,11 @@ function computeFallbackData() {
     if (t) catTeams[c].add(t)
   })
 
-  // 1. Group active projects by category
+  // 1. Group active projects by category (Active when start date is set)
   const catActiveProjects = {}
   prjs.forEach(p => {
     const s = p.actStart || p.expStart || ''
-    const e = p.actEnd || p.expEnd || ''
-    if (s && e) {
+    if (s) {
       const cat = getCategory(p.project)
       if (!catActiveProjects[cat]) catActiveProjects[cat] = []
       catActiveProjects[cat].push(p)
@@ -66,7 +72,7 @@ function computeFallbackData() {
   // 2. Pre-calculate assigned teams
   const projectAssignedTeams = {}
   const usedTeams = {}
-  ;['DEMI', 'Expansion Joint', 'EDG', 'COA', 'All'].forEach(cat => {
+  ;['DEMI', 'Expansion Joint', 'EDG', 'COA', 'Oil Spill', 'All'].forEach(cat => {
     usedTeams[cat] = new Map()
   })
 
@@ -149,7 +155,7 @@ function computeFallbackData() {
     const cat = getCategory(p.project)
     const s = p.actStart || p.expStart || ''
     const e = p.actEnd || p.expEnd || ''
-    const status = s && e ? 'Active' : 'Pending'
+    const status = s ? 'Active' : 'Pending'
     const computedMob = p.mobDate || calc5DaysPrior(s)
 
     const allTeams = Array.from(catTeams[cat] || []).sort()
@@ -193,7 +199,7 @@ function computeFallbackData() {
     p => p.status === 'Active' && p.assignedHeadcount === 0
   ).length
 
-  const poolStats = ['Expansion Joint', 'EDG', 'DEMI', 'COA', 'All'].map(
+  const poolStats = ['Expansion Joint', 'EDG', 'DEMI', 'COA', 'Oil Spill', 'All'].map(
     cat => {
       const allTeams = Array.from(catTeams[cat] || []).sort()
       const totalStaff = emps.filter(
@@ -511,11 +517,10 @@ export default function Dashboard({ onOpenBackup }) {
         mobDate: newMob || f.mobDate,
       }
 
-      // If dates make project active and no team is selected, auto-assign next available team
+      // If start date is provided and no team is selected, auto-assign next available team
       if (
         selectedTeams.length === 0 &&
-        (updated.actStart || updated.expStart) &&
-        (updated.actEnd || updated.expEnd)
+        (updated.actStart || updated.expStart)
       ) {
         const cat =
           currentEditingProject?.category || getCategory(updated.project)
@@ -655,7 +660,7 @@ export default function Dashboard({ onOpenBackup }) {
       value: kpis.active,
       icon: '✅',
       cls: 'c-green',
-      sub: 'With start & end dates',
+      sub: 'With start date',
     },
     {
       label: 'Pending Projects',
@@ -1109,8 +1114,8 @@ export default function Dashboard({ onOpenBackup }) {
                 }`}
               >
                 {isEditingActive
-                  ? '✅ Active Project — Start & End dates populated. 1 team auto-assigned in alphabetical order.'
-                  : '📅 Pending Project — Input Start & End dates below to auto-populate Mobilization Date (-5d) and claim next available team.'}
+                  ? '✅ Active Project — Start date populated. 1 team auto-assigned in alphabetical order.'
+                  : '📅 Pending Project — Input Start date below to auto-populate Mobilization Date (-5d) and claim next available team.'}
               </div>
 
               {/* AUTOMATIC TEAM SELECTION SECTION (ONLY AVAILABLE TEAMS IN ALPHABETICAL ORDER) */}

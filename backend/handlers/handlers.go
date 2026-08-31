@@ -114,7 +114,7 @@ func computeAllProjects(prjs []*models.Project, emps []*models.Employee) []model
 	// 2. Pre-calculate assigned teams for each active project
 	projectAssignedTeams := make(map[int][]string)
 	usedTeams := make(map[string]map[string]string) // category -> team -> jobCard
-	for _, cat := range []string{"DEMI", "Expansion Joint", "EDG", "COA", "All"} {
+	for _, cat := range []string{"DEMI", "Expansion Joint", "EDG", "COA", "Oil Spill", "All"} {
 		usedTeams[cat] = make(map[string]string)
 	}
 
@@ -272,7 +272,7 @@ func computeKPIs(prjs []*models.Project, emps []*models.Employee) (models.Dashbo
 		}
 	}
 
-	categories := []string{"Expansion Joint", "EDG", "DEMI", "COA", "All"}
+	categories := []string{"Expansion Joint", "EDG", "DEMI", "COA", "Oil Spill", "All"}
 	poolStats := make([]models.PoolCategoryStatus, 0, len(categories))
 
 	for _, cat := range categories {
@@ -708,7 +708,7 @@ func ExportDashboard(c *gin.Context) {
 		ColStart int
 		ColEnd   int
 	}{
-		{"ACTIVE PROJECTS", kpis.Active, "With start & end dates", "#E6F4EA", "#137333", "#A8DAB5", 1, 2},
+		{"ACTIVE PROJECTS", kpis.Active, "With start date", "#E6F4EA", "#137333", "#A8DAB5", 1, 2},
 		{"PENDING PROJECTS", kpis.Pending, "Awaiting scheduling", "#FEF7E0", "#B06000", "#FDD663", 3, 4},
 		{"DEPLOYED SLOTS", kpis.Deployed, "Committed to active", "#E8F0FE", "#1A73E8", "#AECBFA", 5, 7},
 		{"TOTAL WORKFORCE", kpis.Total, "Team slots (incl. Needs)", "#F3E8FD", "#8430CE", "#D7AEFB", 8, 10},

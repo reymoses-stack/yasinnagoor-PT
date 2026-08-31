@@ -14,11 +14,16 @@ const CATEGORY_MAP = {
   EXJ: 'Expansion Joint',
   EDG: 'EDG',
   COA: 'COA',
-  'Oill Spill': 'All',
+  'Oil Spill': 'Oil Spill',
+  'Oill Spill': 'Oil Spill',
+  'Oil': 'Oil Spill',
+  'Oill': 'Oil Spill',
 }
 
 function getCategory(code) {
-  return CATEGORY_MAP[code?.trim()] || 'All'
+  if (!code) return 'All'
+  const trimmed = code.trim()
+  return CATEGORY_MAP[trimmed] || trimmed || 'All'
 }
 
 function calc5DaysPrior(dateStr) {
@@ -50,7 +55,7 @@ function getInitialProjects() {
   return (getStoredProjects() || []).map(p => {
     const s = p.actStart || p.expStart
     const e = p.actEnd || p.expEnd
-    const status = s && e ? 'Active' : 'Pending'
+    const status = s ? 'Active' : 'Pending'
     const computedMob = p.mobDate || calc5DaysPrior(s)
     return {
       ...p,
@@ -249,8 +254,7 @@ export default function Projects({ onOpenBackup }) {
 
       if (
         selectedTeams.length === 0 &&
-        (updated.actStart || updated.expStart) &&
-        (updated.actEnd || updated.expEnd)
+        (updated.actStart || updated.expStart)
       ) {
         const cat =
           currentProject?.category || getCategory(updated.project)

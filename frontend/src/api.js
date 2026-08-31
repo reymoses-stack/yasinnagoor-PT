@@ -20,11 +20,16 @@ const CATEGORY_MAP = {
   EXJ: 'Expansion Joint',
   EDG: 'EDG',
   COA: 'COA',
-  'Oill Spill': 'All',
+  'Oil Spill': 'Oil Spill',
+  'Oill Spill': 'Oil Spill',
+  'Oil': 'Oil Spill',
+  'Oill': 'Oil Spill',
 }
 
 function getCategory(code) {
-  return CATEGORY_MAP[code?.trim()] || 'All'
+  if (!code) return 'All'
+  const trimmed = code.trim()
+  return CATEGORY_MAP[trimmed] || trimmed || 'All'
 }
 
 function calc5DaysPrior(dateStr) {
@@ -48,12 +53,11 @@ export function computeClientDashboard() {
     if (t) catTeams[c].add(t)
   })
 
-  // 1. Group active projects by category
+  // 1. Group active projects by category (Active when start date is set)
   const catActiveProjects = {}
   prjs.forEach(p => {
     const s = p.actStart || p.expStart || ''
-    const e = p.actEnd || p.expEnd || ''
-    if (s && e) {
+    if (s) {
       const cat = getCategory(p.project)
       if (!catActiveProjects[cat]) catActiveProjects[cat] = []
       catActiveProjects[cat].push(p)
@@ -63,7 +67,7 @@ export function computeClientDashboard() {
   // 2. Pre-calculate assigned teams
   const projectAssignedTeams = {}
   const usedTeams = {}
-  ;['DEMI', 'Expansion Joint', 'EDG', 'COA', 'All'].forEach(cat => {
+  ;['DEMI', 'Expansion Joint', 'EDG', 'COA', 'Oil Spill', 'All'].forEach(cat => {
     usedTeams[cat] = new Map()
   })
 
@@ -146,7 +150,7 @@ export function computeClientDashboard() {
     const cat = getCategory(p.project)
     const s = p.actStart || p.expStart || ''
     const e = p.actEnd || p.expEnd || ''
-    const status = s && e ? 'Active' : 'Pending'
+    const status = s ? 'Active' : 'Pending'
     const computedMob = p.mobDate || calc5DaysPrior(s)
 
     const allTeams = Array.from(catTeams[cat] || []).sort()
@@ -190,7 +194,7 @@ export function computeClientDashboard() {
     p => p.status === 'Active' && p.assignedHeadcount === 0
   ).length
 
-  const poolStats = ['Expansion Joint', 'EDG', 'DEMI', 'COA', 'All'].map(
+  const poolStats = ['Expansion Joint', 'EDG', 'DEMI', 'COA', 'Oil Spill', 'All'].map(
     cat => {
       const allTeams = Array.from(catTeams[cat] || []).sort()
       const totalStaff = emps.filter(
@@ -366,7 +370,15 @@ export const getAssigned = async id => {
   } catch {
     const dash = computeClientDashboard()
     const prj = dash.projects.find(p => p.id === Number(id))
-    return { data: prj?.assignedEmps || [] }
+    return {
+      project: prj,
+      status: prj?.status || 'Pending',
+      category: prj?.category || '',
+      assignedTeams: prj?.assignedTeams || [],
+      assigned: prj?.assignedEmps || [],
+      total: prj?.assignedHeadcount || 0,
+      data: prj?.assignedEmps || [],
+    }
   }
 }
 
@@ -498,7 +510,7 @@ export async function exportProjectsData(projects = []) {
     'Mob Date': p.mobDate || '',
     'Actual Start': p.actStart || '',
     'Actual End': p.actEnd || '',
-    'Status': (p.actStart || p.expStart) && (p.actEnd || p.expEnd) ? 'Active' : 'Pending',
+    'Status': (p.actStart || p.expStart) ? 'Active' : 'Pending',
     'Assigned Engineer': p.assignedTo || '',
     'Teams': p.team || '',
     'Remarks': p.remarks || '',

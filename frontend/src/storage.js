@@ -8,7 +8,20 @@ export function getStoredProjects() {
     const raw = localStorage.getItem(KEY_PROJECTS)
     if (raw) {
       const parsed = JSON.parse(raw)
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        let changed = false
+        const sanitized = parsed.map(p => {
+          if (p.project === 'Oill Spill' || p.project === 'Oill') {
+            changed = true
+            return { ...p, project: 'Oil Spill' }
+          }
+          return p
+        })
+        if (changed) {
+          saveStoredProjects(sanitized, false)
+        }
+        return sanitized
+      }
     }
   } catch (e) {
     console.error('Failed to read projects from localStorage', e)
@@ -69,7 +82,7 @@ export function createBackupPayload() {
     metadata: {
       totalProjects: prjs.length,
       totalEmployees: emps.length,
-      activeProjects: prjs.filter(p => (p.actStart || p.expStart) && (p.actEnd || p.expEnd)).length,
+      activeProjects: prjs.filter(p => Boolean(p.actStart || p.expStart)).length,
     },
     projects: prjs,
     employees: emps,

@@ -45,16 +45,20 @@ const COLS = [
   { key: 'unit', label: 'Unit', align: 'center' },
   { key: 'qty', label: 'Qty', align: 'center' },
   { key: 'mobDate', label: 'Mob Date', align: 'center' },
-  { key: 'actStart', label: 'Start Date', align: 'center' },
-  { key: 'actEnd', label: 'End Date', align: 'center' },
+  { key: 'expStart', label: 'Exp Start', align: 'center' },
+  { key: 'expEnd', label: 'Exp End', align: 'center' },
+  { key: 'actStart', label: 'Act Start', align: 'center' },
+  { key: 'actEnd', label: 'Act End', align: 'center' },
+  { key: 'assignedTo', label: 'Assigned To', align: 'left' },
+  { key: 'assignedTeams', label: 'Assigned Teams', align: 'left' },
+  { key: 'remarks', label: 'Remarks', align: 'left' },
   { key: 'status', label: 'Status', align: 'center' },
-  { key: 'assignedEmps', label: 'Assigned Employees', align: 'center' },
+  { key: 'assignedEmps', label: 'Assigned Roster', align: 'center' },
 ]
 
 function getInitialProjects() {
   return (getStoredProjects() || []).map(p => {
     const s = p.actStart || p.expStart
-    const e = p.actEnd || p.expEnd
     const status = s ? 'Active' : 'Pending'
     const computedMob = p.mobDate || calc5DaysPrior(s)
     return {
@@ -204,6 +208,7 @@ export default function Projects({ onOpenBackup }) {
     const available = allTeams.filter(t => !busyOnOthers.has(t)).sort()
 
     let initialTeams = []
+    const hasStart = Boolean(p.actStart || p.expStart)
     if (explicit.length > 0) {
       initialTeams = explicit.filter(t => !busyOnOthers.has(t))
     } else if (p.status === 'Active' && p.assignedTeams && p.assignedTeams.length > 0) {
@@ -212,8 +217,7 @@ export default function Projects({ onOpenBackup }) {
       } else {
         initialTeams = p.assignedTeams.filter(t => !busyOnOthers.has(t))
       }
-    } else if (available.length > 0) {
-      // 1st project in category gets ALL available teams checked by default
+    } else if (hasStart && available.length > 0) {
       initialTeams = otherActive.length === 0 ? available : [available[0]]
     }
 
@@ -252,12 +256,9 @@ export default function Projects({ onOpenBackup }) {
         mobDate: newMob || f.mobDate,
       }
 
-      if (
-        selectedTeams.length === 0 &&
-        (updated.actStart || updated.expStart)
-      ) {
-        const cat =
-          currentProject?.category || getCategory(updated.project)
+      const hasAnyStart = Boolean(updated.actStart || updated.expStart)
+      if (hasAnyStart) {
+        const cat = currentProject?.category || getCategory(updated.project)
         const busy = new Set()
         const otherActive = rows.filter(
           other =>
@@ -289,7 +290,7 @@ export default function Projects({ onOpenBackup }) {
         }
 
         const avail = all.filter(t => !busy.has(t)).sort()
-        if (avail.length > 0) {
+        if (avail.length > 0 && selectedTeams.length === 0) {
           const defaultTeams = otherActive.length === 0 ? avail : [avail[0]]
           setSelectedTeams(defaultTeams)
           updated.team = defaultTeams.join(', ')
@@ -297,6 +298,38 @@ export default function Projects({ onOpenBackup }) {
       }
       return updated
     })
+  }
+
+  const setTodayStart = () => {
+    const today = new Date().toISOString().split('T')[0]
+    handleStartDateChange('actStart', today)
+  }
+
+  const quickStartProject = async p => {
+    const today = new Date().toISOString().split('T')[0]
+    const mob = calc5DaysPrior(today)
+    const cat = p.category || getCategory(p.project)
+    const otherActive = rows.filter(
+      o => o.id !== p.id && o.status === 'Active' && (o.category || getCategory(o.project)) === cat
+    )
+    const all = p.allCategoryTeams || ['A', 'B', 'C', 'D', 'E']
+    const busy = new Set()
+    otherActive.forEach(o => {
+      const explicit = (o.team || '').split(',').map(t => t.replace(/team/i, '').trim()).filter(Boolean)
+      const assigned = explicit.length > 0 ? explicit : (o.assignedTeams || [])
+      assigned.forEach(t => busy.add(t))
+    })
+    const avail = all.filter(t => !busy.has(t)).sort()
+    const teamToAssign = p.team || (avail.length > 0 ? (otherActive.length === 0 ? avail.join(', ') : avail[0]) : '')
+
+    const payload = {
+      ...p,
+      actStart: today,
+      mobDate: mob,
+      team: teamToAssign,
+    }
+    await updateProject(p.id, payload)
+    load()
   }
 
   const toggleTeamSelection = t => {
@@ -311,9 +344,21 @@ export default function Projects({ onOpenBackup }) {
 
   const save = async () => {
     setSaving(true)
+    const startDate = form.actStart || form.expStart
+    let teamsToSave = selectedTeams
+    let mobDateToSave = form.mobDate
+
+    if (startDate && teamsToSave.length === 0 && availableTeamsForEditing.length > 0) {
+      teamsToSave = [firstAvailableTeam]
+    }
+    if (startDate && !mobDateToSave) {
+      mobDateToSave = calc5DaysPrior(startDate)
+    }
+
     const payload = {
       ...form,
-      team: selectedTeams.join(', '),
+      mobDate: mobDateToSave,
+      team: teamsToSave.join(', '),
     }
     try {
       if (editId) {
@@ -487,9 +532,53 @@ export default function Projects({ onOpenBackup }) {
                     {fmtDate(p.mobDateComputed || p.mobDate)}
                   </span>
                 </td>
-                <td className="td-center">{fmtDate(p.expStart)}</td>
+                <td className="td-center">
+                  {p.expStart ? (
+                    fmtDate(p.expStart)
+                  ) : p.status === 'Pending' ? (
+                    <span
+                      onClick={() => openEdit(p)}
+                      style={{
+                        cursor: 'pointer',
+                        fontSize: '11px',
+                        color: '#64748b',
+                        textDecoration: 'underline dotted',
+                      }}
+                      title="Click to set expected start date"
+                    >
+                      + Set Date
+                    </span>
+                  ) : (
+                    '—'
+                  )}
+                </td>
                 <td className="td-center">{fmtDate(p.expEnd)}</td>
-                <td className="td-center">{fmtDate(p.actStart)}</td>
+                <td className="td-center">
+                  {p.actStart ? (
+                    <span style={{ fontWeight: 600, color: '#15803d' }}>
+                      {fmtDate(p.actStart)}
+                    </span>
+                  ) : p.status === 'Pending' ? (
+                    <button
+                      onClick={() => quickStartProject(p)}
+                      style={{
+                        padding: '2px 8px',
+                        background: '#eff6ff',
+                        border: '1px solid #93c5fd',
+                        borderRadius: '6px',
+                        color: '#1d4ed8',
+                        fontSize: '11px',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                      }}
+                      title="Click to start this project today"
+                    >
+                      ▶ Start
+                    </button>
+                  ) : (
+                    '—'
+                  )}
+                </td>
                 <td className="td-center">{fmtDate(p.actEnd)}</td>
                 <td className="td-left">{p.assignedTo || '—'}</td>
                 <td className="td-left">
@@ -548,6 +637,16 @@ export default function Projects({ onOpenBackup }) {
                   )}
                 </td>
                 <td className="td-center action-col">
+                  {p.status === 'Pending' && (
+                    <button
+                      className="btn-icon"
+                      onClick={() => quickStartProject(p)}
+                      title="Start Project Today (Kick Off)"
+                      style={{ background: '#dcfce7', borderColor: '#86efac' }}
+                    >
+                      🚀
+                    </button>
+                  )}
                   <button
                     className="btn-icon"
                     onClick={() => openEdit(p)}
@@ -847,16 +946,37 @@ export default function Projects({ onOpenBackup }) {
                         fontSize: '10.5px',
                       }}
                     >
-                      (Auto updates Mob Date)
+                      (Auto updates Mob Date &amp; Assigns Team)
                     </span>
                   </label>
-                  <input
-                    type="date"
-                    value={form.actStart || ''}
-                    onChange={e =>
-                      handleStartDateChange('actStart', e.target.value)
-                    }
-                  />
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <input
+                      type="date"
+                      value={form.actStart || ''}
+                      onChange={e =>
+                        handleStartDateChange('actStart', e.target.value)
+                      }
+                      style={{ flex: 1 }}
+                    />
+                    <button
+                      type="button"
+                      onClick={setTodayStart}
+                      style={{
+                        padding: '8px 12px',
+                        background: '#dcfce7',
+                        border: '1px solid #86efac',
+                        borderRadius: '8px',
+                        color: '#166534',
+                        fontSize: '11.5px',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        whiteSpace: 'nowrap',
+                      }}
+                      title="Set today as actual start date to kick off project immediately"
+                    >
+                      ⚡ Today
+                    </button>
+                  </div>
                 </div>
 
                 <div className="form-group">

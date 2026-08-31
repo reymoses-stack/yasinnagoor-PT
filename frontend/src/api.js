@@ -320,48 +320,52 @@ export const getProjects = async (params = {}) => {
 }
 
 export const createProject = async body => {
+  let created = null
   try {
-    return await req('/projects', { method: 'POST', body: JSON.stringify(body) })
-  } catch {
-    const prjs = getStoredProjects()
-    const newId = prjs.length > 0 ? Math.max(...prjs.map(p => p.id || 0)) + 1 : 1
-    const newPrj = { ...body, id: newId }
-    if (!newPrj.mobDate && (newPrj.actStart || newPrj.expStart)) {
-      newPrj.mobDate = calc5DaysPrior(newPrj.actStart || newPrj.expStart)
-    }
-    prjs.push(newPrj)
-    saveStoredProjects(prjs)
-    return newPrj
+    created = await req('/projects', { method: 'POST', body: JSON.stringify(body) })
+  } catch {}
+  const prjs = getStoredProjects()
+  const newId = created?.id || (prjs.length > 0 ? Math.max(...prjs.map(p => p.id || 0)) + 1 : 1)
+  const newPrj = { ...body, ...(created || {}), id: newId }
+  if (!newPrj.mobDate && (newPrj.actStart || newPrj.expStart)) {
+    newPrj.mobDate = calc5DaysPrior(newPrj.actStart || newPrj.expStart)
   }
+  const existingIdx = prjs.findIndex(p => p.id === newId)
+  if (existingIdx !== -1) {
+    prjs[existingIdx] = newPrj
+  } else {
+    prjs.push(newPrj)
+  }
+  saveStoredProjects(prjs)
+  return created || newPrj
 }
 
 export const updateProject = async (id, body) => {
+  let updated = null
   try {
-    return await req(`/projects/${id}`, { method: 'PUT', body: JSON.stringify(body) })
-  } catch {
-    const prjs = getStoredProjects()
-    const idx = prjs.findIndex(p => p.id === Number(id))
-    if (idx !== -1) {
-      prjs[idx] = { ...prjs[idx], ...body, id: Number(id) }
-      if (!prjs[idx].mobDate && (prjs[idx].actStart || prjs[idx].expStart)) {
-        prjs[idx].mobDate = calc5DaysPrior(prjs[idx].actStart || prjs[idx].expStart)
-      }
-      saveStoredProjects(prjs)
-      return prjs[idx]
+    updated = await req(`/projects/${id}`, { method: 'PUT', body: JSON.stringify(body) })
+  } catch {}
+  const prjs = getStoredProjects()
+  const idx = prjs.findIndex(p => p.id === Number(id))
+  if (idx !== -1) {
+    prjs[idx] = { ...prjs[idx], ...body, ...(updated ? updated : {}), id: Number(id) }
+    if (!prjs[idx].mobDate && (prjs[idx].actStart || prjs[idx].expStart)) {
+      prjs[idx].mobDate = calc5DaysPrior(prjs[idx].actStart || prjs[idx].expStart)
     }
-    return body
+    saveStoredProjects(prjs)
+    return updated || prjs[idx]
   }
+  return updated || body
 }
 
 export const deleteProject = async id => {
   try {
-    return await req(`/projects/${id}`, { method: 'DELETE' })
-  } catch {
-    let prjs = getStoredProjects()
-    prjs = prjs.filter(p => p.id !== Number(id))
-    saveStoredProjects(prjs)
-    return { success: true }
-  }
+    await req(`/projects/${id}`, { method: 'DELETE' })
+  } catch {}
+  let prjs = getStoredProjects()
+  prjs = prjs.filter(p => p.id !== Number(id))
+  saveStoredProjects(prjs)
+  return { success: true }
 }
 
 export const getAssigned = async id => {

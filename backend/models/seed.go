@@ -112,5 +112,11 @@ func SeedEmployees() []*Employee {
 		{ID:83, EmpID:"Need", NameEn:"Needs", NameAr:"Need", Project:"Expansion Joint", Team:"A", JobCat:"PTW", VehicleType:"-", Plate:"-", Brand:"-", SecExpiry:"-", VehicleStatus:"N/A", GatePass:"N/A", ToolsBox:"-" },
 		{ID:84, EmpID:"Need", NameEn:"Needs", NameAr:"Need", Project:"DEMI", Team:"K", JobCat:"PTW", VehicleType:"-", Plate:"-", Brand:"-", SecExpiry:"-", VehicleStatus:"N/A", GatePass:"N/A", ToolsBox:"-" },
 		{ID:85, EmpID:"Need", NameEn:"Needs", NameAr:"Need", Project:"Expansion Joint", Team:"A", JobCat:"Labor", VehicleType:"-", Plate:"-", Brand:"-", SecExpiry:"-", VehicleStatus:"N/A", GatePass:"N/A", ToolsBox:"-" },
+		{ID:86, EmpID:"OS-001", NameEn:"Tariq Mansoor", NameAr:"طارق منصور", Project:"Oil Spill", Team:"A", JobCat:"Supervisor", VehicleType:"Pick-up", Plate:"1234", Brand:"Toyota", SecExpiry:"2027-01-01", VehicleStatus:"Valid", GatePass:"Valid", ToolsBox:"Yes" },
+		{ID:87, EmpID:"OS-002", NameEn:"Hamad Al-Ghamdi", NameAr:"حمد الغامدي", Project:"Oil Spill", Team:"A", JobCat:"Safety Officer", VehicleType:"-", Plate:"-", Brand:"-", SecExpiry:"2027-01-01", VehicleStatus:"Valid", GatePass:"Valid", ToolsBox:"Yes" },
+		{ID:88, EmpID:"OS-003", NameEn:"Rashid Mahmood", NameAr:"راشد محمود", Project:"Oil Spill", Team:"A", JobCat:"Lead Tech", VehicleType:"-", Plate:"-", Brand:"-", SecExpiry:"-", VehicleStatus:"N/A", GatePass:"Valid", ToolsBox:"Yes" },
+		{ID:89, EmpID:"OS-004", NameEn:"Bilal Farooq", NameAr:"بلال فاروق", Project:"Oil Spill", Team:"A", JobCat:"Operator", VehicleType:"-", Plate:"-", Brand:"-", SecExpiry:"-", VehicleStatus:"N/A", GatePass:"Valid", ToolsBox:"Yes" },
+		{ID:90, EmpID:"OS-005", NameEn:"Zubair Khan", NameAr:"زبیر خان", Project:"Oil Spill", Team:"A", JobCat:"Labor", VehicleType:"-", Plate:"-", Brand:"-", SecExpiry:"-", VehicleStatus:"N/A", GatePass:"Valid", ToolsBox:"-" },
+		{ID:91, EmpID:"Need", NameEn:"Needs", NameAr:"Need", Project:"Oil Spill", Team:"A", JobCat:"Labor", VehicleType:"-", Plate:"-", Brand:"-", SecExpiry:"-", VehicleStatus:"N/A", GatePass:"N/A", ToolsBox:"-" },
 	}
 }

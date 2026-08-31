@@ -47,11 +47,28 @@ export function computeClientDashboard() {
 
   const catTeams = {}
   emps.forEach(e => {
-    const c = e.project
+    const c = getCategory(e.project)
     const t = (e.team || '').trim()
     if (!catTeams[c]) catTeams[c] = new Set()
-    if (t) catTeams[c].add(t)
+    if (t && t !== '-') catTeams[c].add(t)
   })
+
+  // Ensure baseline team pools for all categories so teams are always available
+  if (!catTeams['Expansion Joint'] || catTeams['Expansion Joint'].size === 0) {
+    catTeams['Expansion Joint'] = new Set(['A', 'B', 'C', 'D', 'E'])
+  }
+  if (!catTeams['EDG'] || catTeams['EDG'].size === 0) {
+    catTeams['EDG'] = new Set(['F', 'G', 'M'])
+  }
+  if (!catTeams['DEMI'] || catTeams['DEMI'].size === 0) {
+    catTeams['DEMI'] = new Set(['I', 'K'])
+  }
+  if (!catTeams['COA'] || catTeams['COA'].size === 0) {
+    catTeams['COA'] = new Set(['H'])
+  }
+  if (!catTeams['Oil Spill'] || catTeams['Oil Spill'].size === 0) {
+    catTeams['Oil Spill'] = new Set(['A'])
+  }
 
   // 1. Group active projects by category (Active when start date is set)
   const catActiveProjects = {}
@@ -160,7 +177,7 @@ export function computeClientDashboard() {
     if (status === 'Active') {
       assignedEmps = emps.filter(
         emp =>
-          (cat === 'All' || emp.project === cat) &&
+          (cat === 'All' || getCategory(emp.project) === cat) &&
           assignedTeams.includes((emp.team || '').trim())
       )
     }
@@ -198,7 +215,7 @@ export function computeClientDashboard() {
     cat => {
       const allTeams = Array.from(catTeams[cat] || []).sort()
       const totalStaff = emps.filter(
-        emp => cat === 'All' || emp.project === cat
+        emp => cat === 'All' || getCategory(emp.project) === cat
       ).length
 
       const teamCards = allTeams.map(t => {
@@ -314,8 +331,8 @@ export const getProjects = async (params = {}) => {
   try {
     return await req('/projects?' + new URLSearchParams(params))
   } catch {
-    const prjs = getStoredProjects()
-    return { data: prjs }
+    const dash = computeClientDashboard()
+    return { data: dash.projects }
   }
 }
 

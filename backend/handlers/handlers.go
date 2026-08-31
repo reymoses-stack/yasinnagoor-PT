@@ -47,9 +47,10 @@ func calcMobDate(startDateStr string) string {
 func getCategoryTeams(cat string, allEmps []*models.Employee) []string {
 	teamSet := make(map[string]bool)
 	for _, e := range allEmps {
-		if cat == "All" || e.Project == cat {
+		eCat := models.GetCategory(e.Project)
+		if cat == "All" || eCat == cat || e.Project == cat {
 			t := strings.TrimSpace(e.Team)
-			if t != "" {
+			if t != "" && t != "-" {
 				teamSet[t] = true
 			}
 		}
@@ -59,6 +60,24 @@ func getCategoryTeams(cat string, allEmps []*models.Employee) []string {
 		teams = append(teams, t)
 	}
 	sort.Strings(teams)
+	if len(teams) == 0 {
+		switch cat {
+		case "Expansion Joint":
+			teams = []string{"A", "B", "C", "D", "E"}
+		case "EDG":
+			teams = []string{"F", "G", "M"}
+		case "DEMI":
+			teams = []string{"I", "K"}
+		case "COA":
+			teams = []string{"H"}
+		case "Oil Spill":
+			teams = []string{"A"}
+		default:
+			if cat != "All" {
+				teams = []string{"A"}
+			}
+		}
+	}
 	return teams
 }
 
@@ -66,7 +85,8 @@ func getCategoryTeams(cat string, allEmps []*models.Employee) []string {
 func getTeamEmployees(cat, team string, allEmps []*models.Employee) []*models.Employee {
 	var emps []*models.Employee
 	for _, e := range allEmps {
-		if (cat == "All" || e.Project == cat) && strings.TrimSpace(e.Team) == strings.TrimSpace(team) {
+		eCat := models.GetCategory(e.Project)
+		if (cat == "All" || eCat == cat || e.Project == cat) && strings.TrimSpace(e.Team) == strings.TrimSpace(team) {
 			emps = append(emps, e)
 		}
 	}
@@ -457,17 +477,54 @@ func UpdateProject(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	// Auto calculate mobilization date 5 days before start date if empty
-	if strings.TrimSpace(body.MobDate) == "" && body.EffectiveStart() != "" {
-		body.MobDate = calcMobDate(body.EffectiveStart())
-	}
 
 	mu.Lock()
 	defer mu.Unlock()
 	for i, p := range projects {
 		if p.ID == id {
-			body.ID = id
-			projects[i] = &body
+			if body.JobCard != "" {
+				p.JobCard = body.JobCard
+			}
+			if body.Contract != "" {
+				p.Contract = body.Contract
+			}
+			if body.ServiceOrder != "" {
+				p.ServiceOrder = body.ServiceOrder
+			}
+			if body.Project != "" {
+				p.Project = body.Project
+			}
+			if body.Desc != "" {
+				p.Desc = body.Desc
+			}
+			if body.Unit != "" {
+				p.Unit = body.Unit
+			}
+			if body.Qty != 0 {
+				p.Qty = body.Qty
+			}
+			if body.Location != "" {
+				p.Location = body.Location
+			}
+			p.ExpStart = body.ExpStart
+			p.ExpEnd = body.ExpEnd
+			p.ActStart = body.ActStart
+			p.ActEnd = body.ActEnd
+			if body.AssignedTo != "" {
+				p.AssignedTo = body.AssignedTo
+			}
+			p.Team = body.Team
+			if body.Remarks != "" {
+				p.Remarks = body.Remarks
+			}
+			if strings.TrimSpace(body.MobDate) != "" {
+				p.MobDate = body.MobDate
+			} else if p.EffectiveStart() != "" {
+				p.MobDate = calcMobDate(p.EffectiveStart())
+			}
+
+			projects[i] = p
+
 			details := computeAllProjects(projects, employees)
 			for _, d := range details {
 				if d.ID == id {
@@ -475,7 +532,7 @@ func UpdateProject(c *gin.Context) {
 					return
 				}
 			}
-			c.JSON(http.StatusOK, body)
+			c.JSON(http.StatusOK, p)
 			return
 		}
 	}

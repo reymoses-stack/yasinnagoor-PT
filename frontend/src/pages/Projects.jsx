@@ -70,6 +70,15 @@ function getInitialProjects() {
   })
 }
 
+const CATEGORY_TEAMS_DEFAULT = {
+  'Expansion Joint': ['A', 'B', 'C', 'D', 'E'],
+  'EDG': ['F', 'G', 'M'],
+  'DEMI': ['I', 'K'],
+  'COA': ['H'],
+  'Oil Spill': ['A'],
+  'All': ['-'],
+}
+
 const EMPTY = {
   jobCard: '',
   contract: '',
@@ -181,7 +190,9 @@ export default function Projects({ onOpenBackup }) {
         (other.category || getCategory(other.project)) === cat
     )
 
-    const allTeams = p.allCategoryTeams || ['A', 'B', 'C', 'D', 'E']
+    const allTeams = (p.allCategoryTeams && p.allCategoryTeams.length > 0)
+      ? p.allCategoryTeams
+      : (CATEGORY_TEAMS_DEFAULT[cat] || ['A'])
 
     if (otherActive.length > 0) {
       const firstActiveOther = otherActive[0]
@@ -205,17 +216,20 @@ export default function Projects({ onOpenBackup }) {
       })
     }
 
-    const available = allTeams.filter(t => !busyOnOthers.has(t)).sort()
+    let available = allTeams.filter(t => !busyOnOthers.has(t)).sort()
+    if (available.length === 0) available = allTeams
 
     let initialTeams = []
     const hasStart = Boolean(p.actStart || p.expStart)
     if (explicit.length > 0) {
       initialTeams = explicit.filter(t => !busyOnOthers.has(t))
+      if (initialTeams.length === 0) initialTeams = explicit
     } else if (p.status === 'Active' && p.assignedTeams && p.assignedTeams.length > 0) {
       if (otherActive.length === 0) {
         initialTeams = p.assignedTeams
       } else {
         initialTeams = p.assignedTeams.filter(t => !busyOnOthers.has(t))
+        if (initialTeams.length === 0) initialTeams = [p.assignedTeams[0]]
       }
     } else if (hasStart && available.length > 0) {
       initialTeams = otherActive.length === 0 ? available : [available[0]]
@@ -266,7 +280,9 @@ export default function Projects({ onOpenBackup }) {
             other.status === 'Active' &&
             (other.category || getCategory(other.project)) === cat
         )
-        const all = currentProject?.allCategoryTeams || ['A', 'B', 'C', 'D', 'E']
+        const all = (currentProject?.allCategoryTeams && currentProject.allCategoryTeams.length > 0)
+          ? currentProject.allCategoryTeams
+          : (CATEGORY_TEAMS_DEFAULT[cat] || ['A'])
 
         if (otherActive.length > 0) {
           const firstActiveOther = otherActive[0]
@@ -289,12 +305,14 @@ export default function Projects({ onOpenBackup }) {
           })
         }
 
-        const avail = all.filter(t => !busy.has(t)).sort()
-        if (avail.length > 0 && selectedTeams.length === 0) {
-          const defaultTeams = otherActive.length === 0 ? avail : [avail[0]]
-          setSelectedTeams(defaultTeams)
-          updated.team = defaultTeams.join(', ')
-        }
+        let avail = all.filter(t => !busy.has(t)).sort()
+        if (avail.length === 0) avail = all
+        const defaultTeams = otherActive.length === 0 ? avail : [avail[0]]
+        setSelectedTeams(defaultTeams)
+        updated.team = defaultTeams.join(', ')
+      } else {
+        setSelectedTeams([])
+        updated.team = ''
       }
       return updated
     })
@@ -312,21 +330,25 @@ export default function Projects({ onOpenBackup }) {
     const otherActive = rows.filter(
       o => o.id !== p.id && o.status === 'Active' && (o.category || getCategory(o.project)) === cat
     )
-    const all = p.allCategoryTeams || ['A', 'B', 'C', 'D', 'E']
+    const all = (p.allCategoryTeams && p.allCategoryTeams.length > 0)
+      ? p.allCategoryTeams
+      : (CATEGORY_TEAMS_DEFAULT[cat] || ['A'])
+
     const busy = new Set()
     otherActive.forEach(o => {
       const explicit = (o.team || '').split(',').map(t => t.replace(/team/i, '').trim()).filter(Boolean)
       const assigned = explicit.length > 0 ? explicit : (o.assignedTeams || [])
       assigned.forEach(t => busy.add(t))
     })
-    const avail = all.filter(t => !busy.has(t)).sort()
-    const teamToAssign = p.team || (avail.length > 0 ? (otherActive.length === 0 ? avail.join(', ') : avail[0]) : '')
+    let avail = all.filter(t => !busy.has(t)).sort()
+    if (avail.length === 0) avail = all
+    const teamToAssign = otherActive.length === 0 ? avail.join(', ') : avail[0]
 
     const payload = {
       ...p,
       actStart: today,
       mobDate: mob,
-      team: teamToAssign,
+      team: p.team || teamToAssign,
     }
     await updateProject(p.id, payload)
     load()
@@ -348,8 +370,10 @@ export default function Projects({ onOpenBackup }) {
     let teamsToSave = selectedTeams
     let mobDateToSave = form.mobDate
 
-    if (startDate && teamsToSave.length === 0 && availableTeamsForEditing.length > 0) {
-      teamsToSave = [firstAvailableTeam]
+    if (startDate && teamsToSave.length === 0) {
+      teamsToSave = availableTeamsForEditing.length > 0
+        ? [firstAvailableTeam]
+        : (allCategoryTeams.length > 0 ? [allCategoryTeams[0]] : ['A'])
     }
     if (startDate && !mobDateToSave) {
       mobDateToSave = calc5DaysPrior(startDate)

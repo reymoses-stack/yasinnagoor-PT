@@ -52,11 +52,28 @@ function computeFallbackData() {
 
   const catTeams = {}
   emps.forEach(e => {
-    const c = e.project
+    const c = getCategory(e.project)
     const t = (e.team || '').trim()
     if (!catTeams[c]) catTeams[c] = new Set()
-    if (t) catTeams[c].add(t)
+    if (t && t !== '-') catTeams[c].add(t)
   })
+
+  // Baseline team pools for all categories
+  if (!catTeams['Expansion Joint'] || catTeams['Expansion Joint'].size === 0) {
+    catTeams['Expansion Joint'] = new Set(['A', 'B', 'C', 'D', 'E'])
+  }
+  if (!catTeams['EDG'] || catTeams['EDG'].size === 0) {
+    catTeams['EDG'] = new Set(['F', 'G', 'M'])
+  }
+  if (!catTeams['DEMI'] || catTeams['DEMI'].size === 0) {
+    catTeams['DEMI'] = new Set(['I', 'K'])
+  }
+  if (!catTeams['COA'] || catTeams['COA'].size === 0) {
+    catTeams['COA'] = new Set(['H'])
+  }
+  if (!catTeams['Oil Spill'] || catTeams['Oil Spill'].size === 0) {
+    catTeams['Oil Spill'] = new Set(['A'])
+  }
 
   // 1. Group active projects by category (Active when start date is set)
   const catActiveProjects = {}

@@ -12,14 +12,13 @@ func main() {
 
 	r := gin.Default()
 
-	// CORS — allow React dev server
-	r.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"http://localhost:5173", "http://localhost:3000"},
-		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type"},
-		ExposeHeaders:    []string{"Content-Disposition"},
-		AllowCredentials: false,
-	}))
+	// CORS — allow all local dev servers and client origins
+	corsCfg := cors.DefaultConfig()
+	corsCfg.AllowAllOrigins = true
+	corsCfg.AllowMethods = []string{"GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"}
+	corsCfg.AllowHeaders = []string{"Origin", "Content-Type", "Accept", "Authorization", "X-Requested-With"}
+	corsCfg.ExposeHeaders = []string{"Content-Disposition"}
+	r.Use(cors.New(corsCfg))
 
 	api := r.Group("/api")
 	{

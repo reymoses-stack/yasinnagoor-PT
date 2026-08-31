@@ -1,0 +1,134 @@
+.am-overlay {
+  position: fixed; inset: 0;
+  background: rgba(180,200,230,0.3);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  z-index: 300;
+  display: flex; align-items: center; justify-content: center;
+  padding: 1rem;
+  animation: fadeIn 0.15s ease;
+}
+@keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }
+
+.am-modal {
+  background: rgba(255,255,255,0.95);
+  backdrop-filter: blur(40px) saturate(2);
+  -webkit-backdrop-filter: blur(40px) saturate(2);
+  border: 1px solid rgba(255,255,255,0.9);
+  border-radius: 22px;
+  box-shadow: 0 20px 60px rgba(80,110,160,0.2), 0 4px 12px rgba(80,110,160,0.1);
+  width: 100%; max-width: 900px;
+  max-height: 85vh;
+  display: flex; flex-direction: column;
+  animation: modalIn 0.22s cubic-bezier(0.34,1.4,0.64,1);
+}
+@keyframes modalIn {
+  from { opacity: 0; transform: scale(0.94) translateY(14px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.am-header {
+  padding: 1.3rem 1.5rem;
+  border-bottom: 1px solid rgba(200,210,230,0.4);
+  display: flex; align-items: center; gap: 1rem;
+}
+.am-title { font-size: 1.05rem; font-weight: 800; color: #1a1f2e; }
+.am-subtitle { font-size: 12px; color: #8a96aa; margin-top: 2px; }
+.am-badge {
+  margin-left: auto;
+  background: rgba(26,111,196,0.1);
+  color: #1a6fc4;
+  border: 1px solid rgba(26,111,196,0.2);
+  border-radius: 999px;
+  padding: 0.25rem 0.75rem;
+  font-size: 12px;
+  font-weight: 700;
+}
+.am-close {
+  width: 30px; height: 30px;
+  background: rgba(0,0,0,0.04);
+  border: 1px solid rgba(200,210,230,0.5);
+  border-radius: 8px;
+  color: #4a5568;
+  font-size: 12px;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: all 0.18s;
+  flex-shrink: 0;
+}
+.am-close:hover { background: rgba(214,48,49,0.08); color: #d63031; border-color: rgba(214,48,49,0.3); }
+
+.am-body { padding: 1.2rem 1.5rem; overflow-y: auto; flex: 1; }
+
+.am-center { text-align: center; padding: 3rem; color: #8a96aa; font-size: 14px; }
+.am-error  { color: #d63031; }
+
+.am-spinner {
+  width: 32px; height: 32px;
+  border: 3px solid rgba(26,111,196,0.15);
+  border-top-color: #1a6fc4;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  margin: 0 auto 1rem;
+}
+@keyframes spin { to { transform: rotate(360deg) } }
+
+.am-status-row { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1rem; }
+.am-status-badge {
+  padding: 0.22rem 0.65rem;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+.am-status-badge.active  { background: rgba(40,167,69,0.1); color: #28a745; border: 1px solid rgba(40,167,69,0.2); }
+.am-status-badge.pending { background: rgba(224,140,0,0.1);  color: #e08c00; border: 1px solid rgba(224,140,0,0.2);  }
+.am-project-name { font-size: 13px; color: #4a5568; font-weight: 600; }
+
+.am-empty {
+  text-align: center;
+  padding: 2.5rem;
+  background: rgba(224,140,0,0.06);
+  border: 1px solid rgba(224,140,0,0.2);
+  border-radius: 14px;
+  color: #e08c00;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.am-table-wrapper { border-radius: 12px; overflow: auto; }
+.am-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+  min-width: 700px;
+}
+.am-table thead tr { background: rgba(240,244,251,0.8); }
+.am-table th {
+  padding: 0.65rem 0.85rem;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #8a96aa;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  text-align: left;
+  border-bottom: 1px solid rgba(200,210,230,0.4);
+  white-space: nowrap;
+}
+.am-table td {
+  padding: 0.6rem 0.85rem;
+  border-bottom: 1px solid rgba(200,210,230,0.25);
+  color: #1a1f2e;
+  vertical-align: middle;
+}
+.am-table tbody tr:last-child td { border-bottom: none; }
+.am-table tbody tr:hover { background: rgba(26,111,196,0.03); }
+
+.emp-code { font-size: 11px; color: #4a5568; background: rgba(240,244,251,0.9); padding: 2px 6px; border-radius: 5px; }
+.name-en { font-weight: 500; }
+.name-ar { font-size: 12px; color: #4a5568; }
+.center { text-align: center; }
+
+.gp-yes  { color: #28a745; font-weight: 600; }
+.gp-no   { color: #d63031; }
+.gp-n\/a { color: #8a96aa; }

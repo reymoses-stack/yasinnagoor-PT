@@ -336,6 +336,10 @@ export default function Workforce({ onOpenBackup }) {
           </div>
         </div>
 
+        <div className="table-scroll-hint">
+          <span>↔ Swipe horizontally to view all employee columns</span>
+        </div>
+
         <div className="table-wrapper">
           <table className="data-table">
             <thead>

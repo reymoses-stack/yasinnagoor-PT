@@ -48,22 +48,13 @@ An executive real-time project management and workforce scheduling platform buil
 
 ### 1. Prerequisites
 * **Node.js** (v18+)
-* **Go** (1.21+) *(Optional: only needed if running local Go backend)*
 
-### 2. Run Frontend
+### 2. Run Application
 ```bash
-cd frontend
-npm install
 npm run dev
+# or: cd frontend && npm run dev
 ```
-Open [http://localhost:5173](http://localhost:5173) in your browser.
-
-### 3. Run Go Backend (Optional)
-```bash
-cd backend
-go run main.go
-```
-The REST API will start on [http://localhost:8080](http://localhost:8080).
+Open [http://localhost:5173](http://localhost:5173) in your browser. All database operations, sequential allocation algorithms, and Excel generation run 100% natively in React!
 
 ---
 

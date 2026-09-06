@@ -11,7 +11,10 @@ export default function AssignedModal({ projectId, projectName, onClose }) {
   useEffect(() => {
     setLoading(true)
     getAssigned(projectId)
-      .then(setData)
+      .then(res => {
+        const payload = res?.data || res
+        setData(payload)
+      })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))
   }, [projectId])
@@ -67,7 +70,11 @@ export default function AssignedModal({ projectId, projectName, onClose }) {
               <div className="am-status-row">
                 <span
                   className={`am-status-badge ${
-                    data.status === 'Active' ? 'active' : 'pending'
+                    data.status === 'Active'
+                      ? 'active'
+                      : data.status === 'Completed'
+                      ? 'completed'
+                      : 'pending'
                   }`}
                 >
                   {data.status}
@@ -84,7 +91,7 @@ export default function AssignedModal({ projectId, projectName, onClose }) {
                       fontWeight: 600,
                     }}
                   >
-                    Teams Deployed:{' '}
+                    Teams Assigned:{' '}
                     {data.assignedTeams.map(t => `Team ${t}`).join(', ')}
                   </span>
                 )}
@@ -92,7 +99,10 @@ export default function AssignedModal({ projectId, projectName, onClose }) {
 
               {!data.assigned || data.assigned.length === 0 ? (
                 <div className="am-empty">
-                  This project is <strong>Pending</strong>. Set a start date to activate and assign teams.
+                  This project is <strong>{data.status || 'Pending'}</strong>.{' '}
+                  {data.status === 'Completed'
+                    ? 'No roster records found.'
+                    : 'Set start & end dates to activate and assign teams.'}
                 </div>
               ) : (
                 <div className="am-table-wrapper">
@@ -110,17 +120,31 @@ export default function AssignedModal({ projectId, projectName, onClose }) {
                       </tr>
                     </thead>
                     <tbody>
-                      {data.assigned.map((e, i) => {
-                        const need = isNeed(e)
-                        return (
-                          <tr
-                            key={e.id}
-                            style={{
-                              background: need
-                                ? 'rgba(245, 158, 11, 0.06)'
-                                : 'transparent',
-                            }}
-                          >
+                      {[...(data.assigned || [])]
+                        .sort((a, b) => {
+                          const teamA = (a.team || '').replace(/team/i, '').trim().toUpperCase()
+                          const teamB = (b.team || '').replace(/team/i, '').trim().toUpperCase()
+                          if (teamA !== teamB) {
+                            return teamA.localeCompare(teamB, undefined, { numeric: true })
+                          }
+                          const isNeedA = isNeed(a)
+                          const isNeedB = isNeed(b)
+                          if (isNeedA !== isNeedB) return isNeedA ? 1 : -1
+                          const nameA = (a.nameEn || '').trim().toLowerCase()
+                          const nameB = (b.nameEn || '').trim().toLowerCase()
+                          return nameA.localeCompare(nameB)
+                        })
+                        .map((e, i) => {
+                          const need = isNeed(e)
+                          return (
+                            <tr
+                              key={e.id}
+                              style={{
+                                background: need
+                                  ? 'rgba(245, 158, 11, 0.06)'
+                                  : 'transparent',
+                              }}
+                            >
                             <td>{i + 1}</td>
                             <td>
                               <code

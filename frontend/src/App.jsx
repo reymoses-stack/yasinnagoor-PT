@@ -22,12 +22,12 @@ function getLocalTimeData() {
     year: 'numeric',
   })
 
-  // Time formatted with seconds: "12:24:35 AM"
-  const timeStr = now.toLocaleTimeString('en-US', {
+  // Time formatted with seconds in 24-hour format: "23:34:51"
+  const timeStr = now.toLocaleTimeString('en-GB', {
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
-    hour12: true,
+    hour12: false,
   })
 
   // Browser/Internet Local Timezone
@@ -151,7 +151,22 @@ export default function App() {
 
       {/* Backup & Multi-Device Transfer Modal */}
       {showBackup && <BackupModal onClose={() => setShowBackup(false)} />}
+
+      {/* Powered by The Nexus Lab Floating Bottom-Right Branding Badge */}
+      <a
+        href="https://www.thenexuslab.in"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="nexus-footer-badge"
+        title="Powered by The Nexus Lab (www.thenexuslab.in)"
+      >
+        <span className="nexus-badge-dot" />
+        <span className="nexus-badge-text">Powered by</span>
+        <span className="nexus-badge-brand">The Nexus Lab</span>
+        <span className="nexus-badge-arrow">↗</span>
+      </a>
     </div>
   )
 }
+
 

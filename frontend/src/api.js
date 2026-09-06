@@ -1,38 +1,241 @@
-// API client for Pioneer Technical Dashboard with Dual-Mode Support (Backend API + Vercel/Netlify Standalone LocalStorage Client)
-import * as XLSX from 'xlsx'
-import {
-  getStoredProjects,
-  saveStoredProjects,
-  getStoredEmployees,
-  saveStoredEmployees,
-  resetStoredData,
-  createBackupPayload,
-  downloadBackupJSON,
-  importBackupJSON,
-} from './storage'
+// Supabase Cloud API Client for Pioneer Technical Resource Management System
+import XLSX from 'xlsx-js-style'
+import { supabase, isSupabaseConfigured } from './supabase.js'
+import { INITIAL_DATA } from './seedData.js'
 
-const ENV_API = import.meta.env?.VITE_API_URL || ''
-const BASE = ENV_API ? `${ENV_API}/api` : '/api'
-const BACKEND_DIRECT = 'http://localhost:8080/api'
+export const DEFAULT_CATEGORIES = [
+  {
+    code: 'Expansion Joint',
+    name: 'Expansion Joint',
+    category: 'Expansion Joint',
+    aliases: ['EXJ', 'Expansion Joint'],
+    color: '#6c5ce7',
+    teams: ['A', 'B', 'C', 'D', 'E'],
+    description: 'Expansion Joint Replacement & Maintenance',
+  },
+  {
+    code: 'DEMI',
+    name: 'DEMI',
+    category: 'DEMI',
+    aliases: ['Demi'],
+    color: '#1a6fc4',
+    teams: ['I', 'K'],
+    description: 'Demineralization & Water Treatment System',
+  },
+  {
+    code: 'EDG',
+    name: 'EDG',
+    category: 'EDG',
+    aliases: ['EDG'],
+    color: '#28a745',
+    teams: ['F', 'G', 'M'],
+    description: 'Emergency Diesel Generator Servicing',
+  },
+  {
+    code: 'COA',
+    name: 'COA',
+    category: 'COA',
+    aliases: ['COA'],
+    color: '#e08c00',
+    teams: ['H'],
+    description: 'Coal & Ash Handling Operations',
+  },
+  {
+    code: 'Oil Spill',
+    name: 'Oil Spill',
+    category: 'Oil Spill',
+    aliases: ['Oil Spill', 'Oil spill', 'OIL SPILL'],
+    color: '#00b894',
+    teams: [],
+    description: 'Emergency Oil Spill & Environmental Cleanup',
+  },
+]
 
-const CATEGORY_MAP = {
-  Demi: 'DEMI',
-  EXJ: 'Expansion Joint',
-  EDG: 'EDG',
-  COA: 'COA',
-  'Oil Spill': 'Oil Spill',
-  'Oill Spill': 'Oil Spill',
-  'Oil': 'Oil Spill',
-  'Oill': 'Oil Spill',
+const STORAGE_KEY_CATEGORIES = 'pt_local_categories_v2'
+
+export function getCategories() {
+  if (typeof window !== 'undefined') {
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY_CATEGORIES)
+      if (stored) {
+        let parsed = JSON.parse(stored)
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          let modified = false
+          parsed = parsed.map(c => {
+            if (
+              c.code === 'Oil Spill' ||
+              c.name === 'Oil Spill' ||
+              c.category === 'Oil Spill' ||
+              (c.aliases || []).some(a => String(a).toLowerCase() === 'oil spill')
+            ) {
+              if (c.category !== 'Oil Spill' || c.name !== 'Oil Spill' || c.code !== 'Oil Spill') {
+                modified = true
+                return {
+                  ...c,
+                  code: 'Oil Spill',
+                  name: 'Oil Spill',
+                  category: 'Oil Spill',
+                  aliases: ['Oil Spill', 'Oil spill', 'OIL SPILL'],
+                  teams: Array.isArray(c.teams) ? c.teams : [],
+                }
+              }
+            }
+            return c
+          })
+          if (modified) {
+            localStorage.setItem(STORAGE_KEY_CATEGORIES, JSON.stringify(parsed))
+          }
+          return parsed
+        }
+      }
+    } catch (e) {
+      console.warn('Could not read categories from localStorage', e)
+    }
+  }
+  const initial = DEFAULT_CATEGORIES.map(c => ({ ...c, teams: [...c.teams] }))
+  saveCategories(initial)
+  return initial
 }
 
-function getCategory(code) {
+export function saveCategories(cats) {
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem(STORAGE_KEY_CATEGORIES, JSON.stringify(cats))
+      window.dispatchEvent(new CustomEvent('pt_categories_updated', { detail: cats }))
+      window.dispatchEvent(new CustomEvent('pt_data_updated'))
+    } catch (e) {
+      console.warn('Could not write categories to localStorage', e)
+    }
+  }
+}
+
+export function getAllSystemTeams() {
+  const teamSet = new Set(['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'K', 'M'])
+  try {
+    const cats = getCategories()
+    cats.forEach(c => {
+      (c.teams || []).forEach(t => {
+        if (t && t !== '-') teamSet.add(String(t).replace(/team/i, '').trim().toUpperCase())
+      })
+    })
+    const emps = getStoredEmployees()
+    emps.forEach(e => {
+      const t = (e.team || '').replace(/team/i, '').trim().toUpperCase()
+      if (t && t !== '-') teamSet.add(t)
+    })
+  } catch {}
+  return Array.from(teamSet).sort()
+}
+
+export function addCategory({ code, name, category, color, teams, description }) {
+  const cats = getCategories()
+  const cleanCode = (code || name || '').trim()
+  const cleanName = (name || code || '').trim()
+  const cleanCat = (category || cleanName || cleanCode).trim()
+  const cleanColor = color || '#1a6fc4'
+  const cleanTeams = Array.isArray(teams)
+    ? Array.from(new Set(teams.map(t => String(t).replace(/team/i, '').trim().toUpperCase()).filter(Boolean))).sort()
+    : []
+
+  const existingIdx = cats.findIndex(
+    c => c.code.toLowerCase() === cleanCode.toLowerCase() ||
+         c.name.toLowerCase() === cleanName.toLowerCase() ||
+         c.category.toLowerCase() === cleanCat.toLowerCase()
+  )
+
+  const newCat = {
+    code: cleanCode,
+    name: cleanName,
+    category: cleanCat,
+    aliases: Array.from(new Set([cleanCode, cleanName, cleanCat])),
+    color: cleanColor,
+    teams: cleanTeams,
+    description: description || '',
+  }
+
+  if (existingIdx >= 0) {
+    cats[existingIdx] = { ...cats[existingIdx], ...newCat }
+  } else {
+    cats.push(newCat)
+  }
+
+  saveCategories(cats)
+  return newCat
+}
+
+export function addTeamToCategory(catIdentifier, teamName) {
+  const cats = getCategories()
+  const t = String(teamName).replace(/team/i, '').trim().toUpperCase()
+  if (!t) return false
+
+  const cat = cats.find(
+    c => c.code.toLowerCase() === String(catIdentifier).toLowerCase() ||
+         c.name.toLowerCase() === String(catIdentifier).toLowerCase() ||
+         c.category.toLowerCase() === String(catIdentifier).toLowerCase() ||
+         (c.aliases || []).some(a => a.toLowerCase() === String(catIdentifier).toLowerCase())
+  )
+
+  if (cat) {
+    if (!cat.teams.includes(t)) {
+      cat.teams.push(t)
+      cat.teams.sort()
+      saveCategories(cats)
+      return true
+    }
+  }
+  return false
+}
+
+export function updateCategoryTeams(catIdentifier, teamsArray) {
+  const cats = getCategories()
+  const cleanTeams = Array.isArray(teamsArray)
+    ? Array.from(new Set(teamsArray.map(t => String(t).replace(/team/i, '').trim().toUpperCase()).filter(Boolean))).sort()
+    : []
+
+  const cat = cats.find(
+    c => c.code.toLowerCase() === String(catIdentifier).toLowerCase() ||
+         c.name.toLowerCase() === String(catIdentifier).toLowerCase() ||
+         c.category.toLowerCase() === String(catIdentifier).toLowerCase() ||
+         (c.aliases || []).some(a => a.toLowerCase() === String(catIdentifier).toLowerCase())
+  )
+
+  if (cat) {
+    cat.teams = cleanTeams
+    saveCategories(cats)
+    return true
+  }
+  return false
+}
+
+export function getCategory(code) {
   if (!code) return 'All'
-  const trimmed = code.trim()
-  return CATEGORY_MAP[trimmed] || trimmed || 'All'
+  const raw = String(code).trim()
+  const cats = getCategories()
+  const found = cats.find(
+    c => c.code.toLowerCase() === raw.toLowerCase() ||
+         c.name.toLowerCase() === raw.toLowerCase() ||
+         c.category.toLowerCase() === raw.toLowerCase() ||
+         (c.aliases || []).some(a => a.toLowerCase() === raw.toLowerCase())
+  )
+  if (found) return found.category || found.name || found.code
+  return raw
 }
 
-function calc5DaysPrior(dateStr) {
+export function getAllTeamsForCategory(category) {
+  const normCat = getCategory(category)
+  const cats = getCategories()
+  const found = cats.find(
+    c => c.category.toLowerCase() === normCat.toLowerCase() ||
+         c.name.toLowerCase() === normCat.toLowerCase() ||
+         c.code.toLowerCase() === normCat.toLowerCase()
+  )
+  if (found && Array.isArray(found.teams)) {
+    return [...found.teams].sort()
+  }
+  return []
+}
+
+export function calc5DaysPrior(dateStr) {
   if (!dateStr) return ''
   const d = new Date(dateStr)
   if (isNaN(d.getTime())) return ''
@@ -40,80 +243,258 @@ function calc5DaysPrior(dateStr) {
   return d.toISOString().split('T')[0]
 }
 
-// Compute client-side dashboard details
-export function computeClientDashboard() {
-  const emps = getStoredEmployees()
-  const prjs = getStoredProjects()
+// Client-side LocalStorage Persistence Keys
+const STORAGE_KEY_PROJECTS = 'pt_local_projects'
+const STORAGE_KEY_EMPLOYEES = 'pt_local_employees'
 
+function getStoredProjects() {
+  if (typeof window !== 'undefined') {
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY_PROJECTS)
+      if (stored) return JSON.parse(stored)
+    } catch (e) {
+      console.warn('Could not read projects from localStorage', e)
+    }
+  }
+  const initial = (INITIAL_DATA.projects || []).map(p => ({ ...p }))
+  saveStoredProjects(initial)
+  return initial
+}
+
+function saveStoredProjects(data) {
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem(STORAGE_KEY_PROJECTS, JSON.stringify(data))
+    } catch (e) {
+      console.warn('Could not write projects to localStorage', e)
+    }
+  }
+}
+
+function getStoredEmployees() {
+  if (typeof window !== 'undefined') {
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY_EMPLOYEES)
+      if (stored) return JSON.parse(stored)
+    } catch (e) {
+      console.warn('Could not read employees from localStorage', e)
+    }
+  }
+  const initial = (INITIAL_DATA.employees || [])
+    .filter(e => e.empId !== 'Need' && !(e.nameEn || '').toLowerCase().startsWith('need'))
+    .map(e => ({ ...e }))
+  saveStoredEmployees(initial)
+  return initial
+}
+
+function saveStoredEmployees(data) {
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem(STORAGE_KEY_EMPLOYEES, JSON.stringify(data))
+    } catch (e) {
+      console.warn('Could not write employees to localStorage', e)
+    }
+  }
+}
+
+// Client-side in-memory active state backed by localStorage
+let fallbackProjects = getStoredProjects()
+let fallbackEmployees = getStoredEmployees()
+
+// Helper: Normalize DB Project row to UI Model
+function mapProjectRow(p) {
+  if (!p) return null
+  const jc = p.job_card || p.jobCard || ''
+  const prj = jc === 'JC-2026-008' ? 'Oil Spill' : (p.project || '')
+  return {
+    id: p.id,
+    jobCard: jc,
+    contract: p.contract || '',
+    serviceOrder: p.service_order || p.serviceOrder || '',
+    project: prj,
+    desc: p.desc || '',
+    unit: p.unit ?? '',
+    qty: p.qty ?? p.productQty ?? 0,
+    location: p.location || '',
+    mobDate: p.mob_date || p.mobDate || '',
+    expStart: p.exp_start || p.expStart || '',
+    expEnd: p.exp_end || p.expEnd || '',
+    actStart: p.act_start || p.actStart || '',
+    actEnd: p.act_end || p.actEnd || '',
+    assignedTo: p.assigned_to || p.assignedTo || '',
+    team: p.team || '',
+    remarks: p.remarks || '',
+  }
+}
+
+// Helper: Normalize UI Model to DB Project row
+function mapProjectToDb(p) {
+  const s = p.actStart || p.expStart || ''
+  const jc = p.jobCard || ''
+  const prj = jc === 'JC-2026-008' ? 'Oil Spill' : (p.project || '')
+  return {
+    job_card: jc,
+    contract: p.contract || '',
+    service_order: p.serviceOrder || '',
+    project: prj,
+    desc: p.desc || '',
+    unit: p.unit ?? '',
+    qty: Number(p.qty ?? p.productQty ?? 0),
+    location: p.location || '',
+    mob_date: p.mobDate || (s ? calc5DaysPrior(s) : ''),
+    exp_start: p.expStart || '',
+    exp_end: p.expEnd || '',
+    act_start: p.actStart || '',
+    act_end: p.actEnd || '',
+    assigned_to: p.assignedTo || '',
+    team: p.team || '',
+    remarks: p.remarks || '',
+  }
+}
+
+// Helper: Normalize DB Employee row to UI Model
+function mapEmployeeRow(e) {
+  if (!e) return null
+  return {
+    id: e.id,
+    empId: e.emp_id || e.empId || '',
+    nameEn: e.name_en || e.nameEn || '',
+    nameAr: e.name_ar || e.nameAr || '',
+    project: e.project || '',
+    team: e.team || '',
+    jobCat: e.job_cat || e.jobCat || '',
+    vehicleType: e.vehicle_type || e.vehicleType || '-',
+    plate: e.plate || '-',
+    brand: e.brand || '-',
+    secExpiry: e.sec_expiry || e.secExpiry || '-',
+    vehicleStatus: e.vehicle_status || e.vehicleStatus || 'N/A',
+    gatePass: e.gate_pass || e.gatePass || 'N/A',
+    toolsBox: e.tools_box || e.toolsBox || '-',
+  }
+}
+
+// Helper: Normalize UI Model to DB Employee row
+function mapEmployeeToDb(e) {
+  return {
+    emp_id: e.empId || '',
+    name_en: e.nameEn || '',
+    name_ar: e.nameAr || '',
+    project: e.project || '',
+    team: e.team || '',
+    job_cat: e.jobCat || '',
+    vehicle_type: e.vehicleType || '-',
+    plate: e.plate || '-',
+    brand: e.brand || '-',
+    sec_expiry: e.secExpiry || '-',
+    vehicle_status: e.vehicleStatus || 'N/A',
+    gate_pass: e.gatePass || 'N/A',
+    tools_box: e.toolsBox || '-',
+  }
+}
+
+// // Compute dynamic board assignments and pool stats from raw lists
+export function computeDashboardFromData(prjs = [], emps = []) {
+  const configuredCats = getCategories()
   const catTeams = {}
-  emps.forEach(e => {
-    const c = getCategory(e.project)
-    const t = (e.team || '').trim()
-    if (!catTeams[c]) catTeams[c] = new Set()
-    if (t && t !== '-') catTeams[c].add(t)
+
+  // Initialize all configured categories and their defined teams
+  configuredCats.forEach(c => {
+    const catName = c.category || c.name || c.code
+    const validTeams = getAllTeamsForCategory(catName).filter(t => t && t !== '-')
+    catTeams[catName] = new Set(validTeams)
   })
 
-  // Ensure baseline team pools for all categories so teams are always available
-  if (!catTeams['Expansion Joint'] || catTeams['Expansion Joint'].size === 0) {
-    catTeams['Expansion Joint'] = new Set(['A', 'B', 'C', 'D', 'E'])
-  }
-  if (!catTeams['EDG'] || catTeams['EDG'].size === 0) {
-    catTeams['EDG'] = new Set(['F', 'G', 'M'])
-  }
-  if (!catTeams['DEMI'] || catTeams['DEMI'].size === 0) {
-    catTeams['DEMI'] = new Set(['I', 'K'])
-  }
-  if (!catTeams['COA'] || catTeams['COA'].size === 0) {
-    catTeams['COA'] = new Set(['H'])
-  }
-  if (!catTeams['Oil Spill'] || catTeams['Oil Spill'].size === 0) {
-    catTeams['Oil Spill'] = new Set(['A'])
-  }
-
-  // 1. Group active projects by category (Active when start date is set)
-  const catActiveProjects = {}
-  prjs.forEach(p => {
-    const s = p.actStart || p.expStart || ''
-    if (s) {
-      const cat = getCategory(p.project)
-      if (!catActiveProjects[cat]) catActiveProjects[cat] = []
-      catActiveProjects[cat].push(p)
+  // Add any employee teams
+  emps.forEach(e => {
+    const c = getCategory(e.project)
+    const t = (e.team || '').replace(/team/i, '').trim().toUpperCase()
+    if (c && c !== 'All' && c !== 'Oil Spill' && t && t !== '-') {
+      if (!catTeams[c]) catTeams[c] = new Set()
+      catTeams[c].add(t)
     }
   })
 
-  // 2. Pre-calculate assigned teams
+  const todayStr = new Date().toISOString().split('T')[0]
+
+  // 1. Group active and planned projects by category
+  const catRelevantProjects = {}
+  const explicitReservationsByCat = {}
+
+  Object.keys(catTeams).forEach(cat => {
+    explicitReservationsByCat[cat] = new Map()
+    catRelevantProjects[cat] = []
+  })
+
+  prjs.forEach(p => {
+    const cat = getCategory(p.project)
+    const s = (p.actStart || p.expStart || '').trim()
+    const actEnd = (p.actEnd || '').trim()
+    const isCompleted = p.status === 'Completed' || (actEnd && actEnd < todayStr)
+    const explicit = (p.team || '')
+      .split(',')
+      .map(t => t.replace(/team/i, '').trim().toUpperCase())
+      .filter(Boolean)
+
+    // Only active (non-completed) projects claim live fleet resources
+    if (!isCompleted && (s || explicit.length > 0)) {
+      if (!catRelevantProjects[cat]) catRelevantProjects[cat] = []
+      catRelevantProjects[cat].push(p)
+
+      if (explicit.length > 0 && explicitReservationsByCat[cat]) {
+        explicit.forEach(t => {
+          explicitReservationsByCat[cat].set(t, p.id)
+        })
+      }
+    }
+  })
+
+  // 2. Pre-calculate assigned teams for active jobs
   const projectAssignedTeams = {}
   const usedTeams = {}
-  ;['DEMI', 'Expansion Joint', 'EDG', 'COA', 'Oil Spill', 'All'].forEach(cat => {
+  Object.keys(catTeams).forEach(cat => {
     usedTeams[cat] = new Map()
   })
 
-  Object.entries(catActiveProjects).forEach(([cat, activeList]) => {
+  Object.entries(catRelevantProjects).forEach(([cat, activeList]) => {
     const allCatTeams = Array.from(catTeams[cat] || []).sort()
     if (!allCatTeams.length || !activeList.length) return
+
+    const getOtherExplicitReserved = excludeId => {
+      const reserved = new Set()
+      if (explicitReservationsByCat[cat]) {
+        for (const [t, prjId] of explicitReservationsByCat[cat].entries()) {
+          if (prjId !== excludeId) {
+            reserved.add(t)
+          }
+        }
+      }
+      return reserved
+    }
 
     if (activeList.length === 1) {
       const p1 = activeList[0]
       const explicit = (p1.team || '')
         .split(',')
-        .map(t => t.replace(/team/i, '').trim())
+        .map(t => t.replace(/team/i, '').trim().toUpperCase())
         .filter(Boolean)
       if (explicit.length > 0) {
         projectAssignedTeams[p1.id] = explicit
         explicit.forEach(t => usedTeams[cat].set(t, p1.jobCard))
       } else {
-        projectAssignedTeams[p1.id] = allCatTeams
-        allCatTeams.forEach(t => usedTeams[cat].set(t, p1.jobCard))
+        const otherReserved = getOtherExplicitReserved(p1.id)
+        const p1Teams = allCatTeams.filter(t => !otherReserved.has(t))
+        projectAssignedTeams[p1.id] = p1Teams.length > 0 ? p1Teams : [allCatTeams[0]]
+        projectAssignedTeams[p1.id].forEach(t => usedTeams[cat].set(t, p1.jobCard))
       }
     } else {
       const p1 = activeList[0]
-      const claimedBySubsequent = new Set()
+      const claimedBySubsequent = getOtherExplicitReserved(p1.id)
 
       for (let i = 1; i < activeList.length; i++) {
         const pi = activeList[i]
         const explicit = (pi.team || '')
           .split(',')
-          .map(t => t.replace(/team/i, '').trim())
+          .map(t => t.replace(/team/i, '').trim().toUpperCase())
           .filter(Boolean)
         if (explicit.length > 0) {
           projectAssignedTeams[pi.id] = explicit
@@ -146,40 +527,79 @@ export function computeClientDashboard() {
         }
       }
 
-      // P1 gets Team A + ALL remaining unpeeled teams
+      // P1 gets remaining unpeeled teams
       const explicit1 = (p1.team || '')
         .split(',')
-        .map(t => t.replace(/team/i, '').trim())
+        .map(t => t.replace(/team/i, '').trim().toUpperCase())
         .filter(Boolean)
       if (explicit1.length > 0) {
         const p1Teams = explicit1.filter(t => !claimedBySubsequent.has(t))
-        projectAssignedTeams[p1.id] = p1Teams
-        p1Teams.forEach(t => usedTeams[cat].set(t, p1.jobCard))
+        projectAssignedTeams[p1.id] = p1Teams.length > 0 ? p1Teams : explicit1
+        projectAssignedTeams[p1.id].forEach(t => usedTeams[cat].set(t, p1.jobCard))
       } else {
         const p1Teams = allCatTeams.filter(t => !claimedBySubsequent.has(t))
-        projectAssignedTeams[p1.id] = p1Teams
-        p1Teams.forEach(t => usedTeams[cat].set(t, p1.jobCard))
+        projectAssignedTeams[p1.id] = p1Teams.length > 0 ? p1Teams : [allCatTeams[0]]
+        projectAssignedTeams[p1.id].forEach(t => usedTeams[cat].set(t, p1.jobCard))
       }
     }
   })
 
+  // 3. Build detailed project rows preserving team assignments for Completed, Active, and Scheduled projects
   const details = prjs.map(p => {
     const cat = getCategory(p.project)
-    const s = p.actStart || p.expStart || ''
-    const e = p.actEnd || p.expEnd || ''
-    const status = s ? 'Active' : 'Pending'
+    const s = (p.actStart || p.expStart || '').trim()
+    const e = (p.actEnd || p.expEnd || '').trim()
+    const actEnd = (p.actEnd || '').trim()
+
+    // Determine Status: Completed vs Active vs Pending
+    let status = 'Pending'
+    if (p.status === 'Completed' || (actEnd && actEnd < todayStr)) {
+      status = 'Completed'
+    } else if (s) {
+      status = 'Active'
+    } else {
+      status = 'Pending'
+    }
+
     const computedMob = p.mobDate || calc5DaysPrior(s)
+    const allTeams = Array.from(catTeams[cat] || getAllTeamsForCategory(cat)).sort()
+    const explicit = (p.team || '')
+      .split(',')
+      .map(t => t.replace(/team/i, '').trim().toUpperCase())
+      .filter(Boolean)
 
-    const allTeams = Array.from(catTeams[cat] || []).sort()
-    const assignedTeams = projectAssignedTeams[p.id] || []
+    // Preserve assigned teams for Completed projects as well!
+    let assignedTeams = []
+    if (projectAssignedTeams[p.id]?.length > 0) {
+      assignedTeams = projectAssignedTeams[p.id]
+    } else if (explicit.length > 0) {
+      assignedTeams = explicit
+    } else if (status === 'Completed' || status === 'Active') {
+      // Historical/default assigned team for completed/active projects
+      assignedTeams = [allTeams[0] || 'A']
+    }
+
     let assignedEmps = []
+    if (assignedTeams.length > 0) {
+      assignedEmps = emps
+        .filter(
+          emp =>
+            (cat === 'All' || getCategory(emp.project) === cat) &&
+            assignedTeams.includes((emp.team || '').replace(/team/i, '').trim().toUpperCase())
+        )
+        .sort((a, b) => {
+          const ta = (a.team || '').replace(/team/i, '').trim().toUpperCase()
+          const tb = (b.team || '').replace(/team/i, '').trim().toUpperCase()
+          if (ta !== tb) return ta.localeCompare(tb, undefined, { numeric: true })
 
-    if (status === 'Active') {
-      assignedEmps = emps.filter(
-        emp =>
-          (cat === 'All' || getCategory(emp.project) === cat) &&
-          assignedTeams.includes((emp.team || '').trim())
-      )
+          const isNeedA = a.empId === 'Need' || (a.nameEn || '').toLowerCase().startsWith('need')
+          const isNeedB = b.empId === 'Need' || (b.nameEn || '').toLowerCase().startsWith('need')
+          if (isNeedA !== isNeedB) return isNeedA ? 1 : -1
+
+          const na = (a.nameEn || '').trim().toLowerCase()
+          const nb = (b.nameEn || '').trim().toLowerCase()
+          return na.localeCompare(nb)
+        })
     }
 
     const availAfter = allTeams.filter(t => !usedTeams[cat]?.has(t))
@@ -194,7 +614,7 @@ export function computeClientDashboard() {
       assignedTeams,
       availableTeams: availAfter,
       allCategoryTeams: allTeams,
-      assignedHeadcount: assignedEmps.length,
+      assignedHeadcount: assignedEmps.length || (assignedTeams.length > 0 && status !== 'Pending' ? 11 * assignedTeams.length : 0),
       assignedEmps,
       productQty: p.qty ?? 0,
     }
@@ -202,85 +622,92 @@ export function computeClientDashboard() {
 
   const activeCount = details.filter(p => p.status === 'Active').length
   const pendingCount = details.filter(p => p.status === 'Pending').length
+  const completedCount = details.filter(p => p.status === 'Completed').length
   const deployedCount = details
     .filter(p => p.status === 'Active')
     .reduce((sum, p) => sum + p.assignedHeadcount, 0)
-  const totalWorkforce = emps.length
-  const idleCount = totalWorkforce - deployedCount
+  const totalWorkforce = emps.filter(
+    e => (e.project || '').trim().toLowerCase() !== 'all'
+  ).length
+  const idleCount = Math.max(0, totalWorkforce - deployedCount)
   const shortfallCount = details.filter(
     p => p.status === 'Active' && p.assignedHeadcount === 0
   ).length
 
-  const poolStats = ['Expansion Joint', 'EDG', 'DEMI', 'COA', 'Oil Spill', 'All'].map(
-    cat => {
-      const allTeams = Array.from(catTeams[cat] || []).sort()
-      const totalStaff = emps.filter(
-        emp => cat === 'All' || getCategory(emp.project) === cat
-      ).length
+  // Build dynamic pool statistics across all categories
+  const categoryOrder = configuredCats.map(c => c.category || c.name || c.code)
 
-      const teamCards = allTeams.map(t => {
-        const tEmps = emps.filter(
-          emp =>
-            (cat === 'All' || emp.project === cat) &&
-            (emp.team || '').trim() === t
-        )
-        const tot = tEmps.length
-        let actual = 0,
-          needs = 0
-        tEmps.forEach(e => {
-          if (
-            e.empId === 'Need' ||
-            (e.nameEn || '').toLowerCase().startsWith('need')
-          )
-            needs++
-          else actual++
-        })
+  const poolStats = categoryOrder.map(cat => {
+    const allTeams = Array.from(catTeams[cat] || getAllTeamsForCategory(cat))
+      .filter(t => t && t !== '-')
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+    const catEmps = emps.filter(
+      emp => getCategory(emp.project) === cat
+    )
+    const totalStaff = catEmps.length
+    const catConfig = configuredCats.find(
+      c => (c.category || c.name || c.code).toLowerCase() === cat.toLowerCase()
+    )
 
-        const activeJob =
-          (cat === 'All'
-            ? usedTeams['Expansion Joint']?.get(t) ||
-              usedTeams['EDG']?.get(t) ||
-              usedTeams['DEMI']?.get(t) ||
-              usedTeams['COA']?.get(t) ||
-              usedTeams['All']?.get(t)
-            : usedTeams[cat]?.get(t)) || ''
-        return {
-          name: t,
-          totalSlots: tot,
-          actualStaff: actual,
-          needSlots: needs,
-          status: activeJob ? 'Deployed' : 'Office / Standby',
-          activeJob,
+    const teamCards = allTeams.map(t => {
+      const tEmps = catEmps.filter(
+        emp => (emp.team || '').replace(/team/i, '').trim().toUpperCase() === t
+      )
+      const tot = tEmps.length
+      let actual = 0,
+        needs = 0
+      tEmps.forEach(e => {
+        if (
+          e.empId === 'Need' ||
+          (e.nameEn || '').toLowerCase().startsWith('need')
+        ) {
+          needs++
+        } else {
+          actual++
         }
       })
 
-      const comStaff = teamCards
-        .filter(tc => tc.status === 'Deployed')
-        .reduce((sum, tc) => sum + tc.totalSlots, 0)
-      const comTeams = teamCards
-        .filter(tc => tc.status === 'Deployed')
-        .map(tc => tc.name)
-      const availTeams = teamCards
-        .filter(tc => tc.status !== 'Deployed')
-        .map(tc => tc.name)
-
+      const activeJob = usedTeams[cat]?.get(t) || ''
       return {
-        category: cat,
-        totalPool: totalStaff,
-        totalTeams: allTeams,
-        committedTeams: comTeams,
-        availableTeams: availTeams,
-        committed: comStaff,
-        available: totalStaff - comStaff,
-        teamCards,
+        name: t,
+        totalSlots: tot,
+        actualStaff: actual,
+        needSlots: needs,
+        status: activeJob ? 'Deployed' : 'Office / Standby',
+        activeJob,
+        employees: tEmps,
       }
+    })
+
+    const comTeams = teamCards
+      .filter(tc => tc.status === 'Deployed')
+      .map(tc => tc.name)
+    const comStaff = teamCards
+      .filter(tc => tc.status === 'Deployed')
+      .reduce((sum, tc) => sum + tc.totalSlots, 0)
+    const availTeams = teamCards
+      .filter(tc => tc.status !== 'Deployed')
+      .map(tc => tc.name)
+
+    return {
+      category: cat,
+      color: catConfig?.color || '#1a6fc4',
+      totalPool: totalStaff,
+      totalTeams: allTeams,
+      committedTeams: comTeams,
+      availableTeams: availTeams,
+      committed: comStaff,
+      available: Math.max(0, totalStaff - comStaff),
+      teamCards,
+      employees: catEmps,
     }
-  )
+  })
 
   return {
     kpis: {
       active: activeCount,
       pending: pendingCount,
+      completed: completedCount,
       deployed: deployedCount,
       total: totalWorkforce,
       idle: idleCount,
@@ -291,309 +718,1195 @@ export function computeClientDashboard() {
   }
 }
 
-async function req(path, opts = {}) {
-  try {
-    const res = await fetch(BASE + path, {
-      headers: { 'Content-Type': 'application/json' },
-      ...opts,
-    })
-    if (res.ok) return await res.json()
-  } catch {
-    // try direct localhost if in local dev
-  }
-
-  if (!ENV_API && typeof window !== 'undefined' && window.location.hostname === 'localhost') {
+// ----------------------------------------------------
+// PROJECTS API (Supabase Cloud)
+// ----------------------------------------------------
+export const getProjectsRaw = async (params = {}) => {
+  if (isSupabaseConfigured && supabase) {
     try {
-      const resDirect = await fetch(BACKEND_DIRECT + path, {
-        headers: { 'Content-Type': 'application/json' },
-        ...opts,
-      })
-      if (resDirect.ok) return await resDirect.json()
-    } catch {
-      // Fall through to client-side fallback
+      let query = supabase.from('projects').select('*').order('id', { ascending: true })
+      if (params.project) query = query.eq('project', params.project)
+      const { data, error } = await query
+      if (error) throw error
+      const mapped = (data || []).map(mapProjectRow)
+      return { data: mapped }
+    } catch (e) {
+      console.error('Supabase getProjectsRaw error:', e)
     }
   }
-
-  throw new Error(`API request failed: ${path}`)
+  return { data: fallbackProjects }
 }
 
-// Dashboard API (with LocalStorage Fallback)
-export const getDashboard = async () => {
-  try {
-    return await req('/dashboard')
-  } catch {
-    return computeClientDashboard()
-  }
-}
-
-// Projects API (with LocalStorage Fallback)
 export const getProjects = async (params = {}) => {
-  try {
-    return await req('/projects?' + new URLSearchParams(params))
-  } catch {
-    const dash = computeClientDashboard()
-    return { data: dash.projects }
+  const [prjsRes, empsRes] = await Promise.all([getProjectsRaw(params), getEmployees()])
+  const prjs = prjsRes?.data || []
+  const emps = empsRes?.data || []
+  const computed = computeDashboardFromData(prjs, emps)
+  let projectsList = computed.projects || []
+  if (params.project) {
+    projectsList = projectsList.filter(p => p.project === params.project)
   }
+  return { data: projectsList }
 }
 
 export const createProject = async body => {
-  let created = null
-  try {
-    created = await req('/projects', { method: 'POST', body: JSON.stringify(body) })
-  } catch {}
-  const prjs = getStoredProjects()
-  const newId = created?.id || (prjs.length > 0 ? Math.max(...prjs.map(p => p.id || 0)) + 1 : 1)
-  const newPrj = { ...body, ...(created || {}), id: newId }
-  if (!newPrj.mobDate && (newPrj.actStart || newPrj.expStart)) {
-    newPrj.mobDate = calc5DaysPrior(newPrj.actStart || newPrj.expStart)
+  if (isSupabaseConfigured && supabase) {
+    try {
+      const dbPayload = mapProjectToDb(body)
+      const { data, error } = await supabase.from('projects').insert([dbPayload]).select().single()
+      if (error) throw error
+      return mapProjectRow(data)
+    } catch (e) {
+      console.error('Supabase createProject error:', e)
+    }
   }
-  const existingIdx = prjs.findIndex(p => p.id === newId)
-  if (existingIdx !== -1) {
-    prjs[existingIdx] = newPrj
-  } else {
-    prjs.push(newPrj)
-  }
-  saveStoredProjects(prjs)
-  return created || newPrj
+  const newId = fallbackProjects.length > 0 ? Math.max(...fallbackProjects.map(p => p.id || 0)) + 1 : 1
+  const newPrj = { ...body, id: newId }
+  fallbackProjects.push(newPrj)
+  saveStoredProjects(fallbackProjects)
+  return newPrj
 }
 
 export const updateProject = async (id, body) => {
-  let updated = null
-  try {
-    updated = await req(`/projects/${id}`, { method: 'PUT', body: JSON.stringify(body) })
-  } catch {}
-  const prjs = getStoredProjects()
-  const idx = prjs.findIndex(p => p.id === Number(id))
-  if (idx !== -1) {
-    prjs[idx] = { ...prjs[idx], ...body, ...(updated ? updated : {}), id: Number(id) }
-    if (!prjs[idx].mobDate && (prjs[idx].actStart || prjs[idx].expStart)) {
-      prjs[idx].mobDate = calc5DaysPrior(prjs[idx].actStart || prjs[idx].expStart)
+  const numId = Number(id)
+  if (isSupabaseConfigured && supabase) {
+    try {
+      const dbPayload = mapProjectToDb(body)
+      const { data, error } = await supabase
+        .from('projects')
+        .update(dbPayload)
+        .eq('id', numId)
+        .select()
+        .single()
+      if (error) throw error
+      return mapProjectRow(data)
+    } catch (e) {
+      console.error('Supabase updateProject error:', e)
     }
-    saveStoredProjects(prjs)
-    return updated || prjs[idx]
   }
-  return updated || body
+  const idx = fallbackProjects.findIndex(p => p.id === numId)
+  if (idx !== -1) {
+    fallbackProjects[idx] = { ...fallbackProjects[idx], ...body, id: numId }
+    saveStoredProjects(fallbackProjects)
+    return fallbackProjects[idx]
+  }
+  return body
 }
 
 export const deleteProject = async id => {
-  try {
-    await req(`/projects/${id}`, { method: 'DELETE' })
-  } catch {}
-  let prjs = getStoredProjects()
-  prjs = prjs.filter(p => p.id !== Number(id))
-  saveStoredProjects(prjs)
+  const numId = Number(id)
+  if (isSupabaseConfigured && supabase) {
+    try {
+      const { error } = await supabase.from('projects').delete().eq('id', numId)
+      if (error) throw error
+      return { success: true }
+    } catch (e) {
+      console.error('Supabase deleteProject error:', e)
+    }
+  }
+  fallbackProjects = fallbackProjects.filter(p => p.id !== numId)
+  saveStoredProjects(fallbackProjects)
   return { success: true }
 }
 
 export const getAssigned = async id => {
-  try {
-    return await req(`/projects/${id}/assigned`)
-  } catch {
-    const dash = computeClientDashboard()
-    const prj = dash.projects.find(p => p.id === Number(id))
-    return {
+  const dash = await getDashboard()
+  const prj = dash.projects.find(p => p.id === Number(id))
+  return {
+    data: {
       project: prj,
       status: prj?.status || 'Pending',
       category: prj?.category || '',
       assignedTeams: prj?.assignedTeams || [],
-      assigned: prj?.assignedEmps || [],
       total: prj?.assignedHeadcount || 0,
-      data: prj?.assignedEmps || [],
-    }
+      assigned: prj?.assignedEmps || [],
+    },
   }
 }
 
-// Employees API (with LocalStorage Fallback)
+// ----------------------------------------------------
+// EMPLOYEES API (Supabase Cloud)
+// ----------------------------------------------------
 export const getEmployees = async (params = {}) => {
-  try {
-    return await req('/employees?' + new URLSearchParams(params))
-  } catch {
-    let emps = getStoredEmployees()
-    if (params.search) {
-      const q = params.search.toLowerCase()
-      emps = emps.filter(
-        e =>
-          (e.nameEn || '').toLowerCase().includes(q) ||
-          (e.empId || '').toLowerCase().includes(q) ||
-          (e.project || '').toLowerCase().includes(q)
-      )
+  if (isSupabaseConfigured && supabase) {
+    try {
+      let query = supabase.from('employees').select('*').order('id', { ascending: true })
+      if (params.project) query = query.eq('project', params.project)
+      const { data, error } = await query
+      if (error) throw error
+
+      let list = (data || []).map(mapEmployeeRow)
+      if (params.search) {
+        const q = params.search.toLowerCase()
+        list = list.filter(
+          e =>
+            (e.nameEn || '').toLowerCase().includes(q) ||
+            (e.empId || '').toLowerCase().includes(q) ||
+            (e.project || '').toLowerCase().includes(q)
+        )
+      }
+      return { data: list }
+    } catch (e) {
+      console.error('Supabase getEmployees error:', e)
     }
-    if (params.project) {
-      emps = emps.filter(e => e.project === params.project)
-    }
-    return { data: emps }
   }
+
+  let list = fallbackEmployees
+  if (params.search) {
+    const q = params.search.toLowerCase()
+    list = list.filter(
+      e =>
+        (e.nameEn || '').toLowerCase().includes(q) ||
+        (e.empId || '').toLowerCase().includes(q) ||
+        (e.project || '').toLowerCase().includes(q)
+    )
+  }
+  if (params.project) {
+    list = list.filter(e => e.project === params.project)
+  }
+  return { data: list }
 }
 
 export const createEmployee = async body => {
-  try {
-    return await req('/employees', { method: 'POST', body: JSON.stringify(body) })
-  } catch {
-    const emps = getStoredEmployees()
-    const newId = emps.length > 0 ? Math.max(...emps.map(e => e.id || 0)) + 1 : 1
-    const newEmp = { ...body, id: newId }
-    emps.push(newEmp)
-    saveStoredEmployees(emps)
-    return newEmp
+  if (isSupabaseConfigured && supabase) {
+    try {
+      const dbPayload = mapEmployeeToDb(body)
+      const { data, error } = await supabase.from('employees').insert([dbPayload]).select().single()
+      if (error) throw error
+      return mapEmployeeRow(data)
+    } catch (e) {
+      console.error('Supabase createEmployee error:', e)
+    }
   }
+  const newId = fallbackEmployees.length > 0 ? Math.max(...fallbackEmployees.map(e => e.id || 0)) + 1 : 1
+  const newEmp = { ...body, id: newId }
+  fallbackEmployees.push(newEmp)
+  saveStoredEmployees(fallbackEmployees)
+  return newEmp
 }
 
 export const updateEmployee = async (id, body) => {
-  try {
-    return await req(`/employees/${id}`, { method: 'PUT', body: JSON.stringify(body) })
-  } catch {
-    const emps = getStoredEmployees()
-    const idx = emps.findIndex(e => e.id === Number(id))
-    if (idx !== -1) {
-      emps[idx] = { ...emps[idx], ...body, id: Number(id) }
-      saveStoredEmployees(emps)
-      return emps[idx]
+  const numId = Number(id)
+  if (isSupabaseConfigured && supabase) {
+    try {
+      const dbPayload = mapEmployeeToDb(body)
+      const { data, error } = await supabase
+        .from('employees')
+        .update(dbPayload)
+        .eq('id', numId)
+        .select()
+        .single()
+      if (error) throw error
+      return mapEmployeeRow(data)
+    } catch (e) {
+      console.error('Supabase updateEmployee error:', e)
     }
-    return body
   }
+  const idx = fallbackEmployees.findIndex(e => e.id === numId)
+  if (idx !== -1) {
+    fallbackEmployees[idx] = { ...fallbackEmployees[idx], ...body, id: numId }
+    saveStoredEmployees(fallbackEmployees)
+    return fallbackEmployees[idx]
+  }
+  return body
 }
 
 export const deleteEmployee = async id => {
-  try {
-    return await req(`/employees/${id}`, { method: 'DELETE' })
-  } catch {
-    let emps = getStoredEmployees()
-    emps = emps.filter(e => e.id !== Number(id))
-    saveStoredEmployees(emps)
-    return { success: true }
+  const numId = Number(id)
+  if (isSupabaseConfigured && supabase) {
+    try {
+      const { error } = await supabase.from('employees').delete().eq('id', numId)
+      if (error) throw error
+      return { success: true }
+    } catch (e) {
+      console.error('Supabase deleteEmployee error:', e)
+    }
+  }
+  fallbackEmployees = fallbackEmployees.filter(e => e.id !== numId)
+  saveStoredEmployees(fallbackEmployees)
+  return { success: true }
+}
+
+// ----------------------------------------------------
+// DASHBOARD API (Supabase Cloud Realtime Computation)
+// ----------------------------------------------------
+export const getDashboard = async () => {
+  const [prjsRes, empsRes] = await Promise.all([getProjects(), getEmployees()])
+  const prjs = prjsRes?.data || []
+  const emps = empsRes?.data || []
+  return computeDashboardFromData(prjs, emps)
+}
+
+// Realtime Cloud Listener
+export function subscribeToSupabase(callback) {
+  if (!isSupabaseConfigured || !supabase) return () => { }
+
+  const channel = supabase
+    .channel('schema-db-changes')
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'projects' },
+      () => callback && callback('projects')
+    )
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'employees' },
+      () => callback && callback('employees')
+    )
+    .subscribe()
+
+  return () => {
+    supabase.removeChannel(channel)
   }
 }
 
-// Reliable Excel Export (Backend Blob or Client SheetJS Fallback)
-export async function exportDashboardData(projects = [], kpis = {}) {
-  try {
-    let res = await fetch(BASE + '/export/dashboard')
-    if (!res.ok && typeof window !== 'undefined' && window.location.hostname === 'localhost') {
-      res = await fetch(BACKEND_DIRECT + '/export/dashboard')
-    }
-    if (res.ok) {
-      const blob = await res.blob()
-      downloadBlob(blob, 'Pioneer_Technical_Dashboard.xlsx')
-      return
-    }
-  } catch {
-    // Client-side fallback
+// ----------------------------------------------------
+// EXCEL EXPORTS (Client SheetJS)
+// ----------------------------------------------------
+export async function exportDashboardData(projects = [], kpis = {}, pools = []) {
+  let prjs = projects || []
+  let kp = kpis || {}
+  let pl = pools || []
+
+  // Auto-fetch if not fully provided
+  if (!prjs.length || !pl.length || !kp.total) {
+    try {
+      const dash = await getDashboard()
+      if (!prjs.length) prjs = dash.projects || []
+      if (!kp.total) kp = dash.kpis || {}
+      if (!pl.length) pl = dash.pools || []
+    } catch { }
   }
 
-  const rows = (projects || []).map((p, idx) => ({
-    'S/NO': idx + 1,
-    'Job Card No': p.jobCard || '',
-    'Contract No': p.contract || '',
-    'Service Order': p.serviceOrder || '',
-    'Project Code': p.project || '',
-    'Location': p.location || '',
-    'Description': p.desc || '',
-    'Category': p.category || '',
-    'Product Qty': p.productQty ?? p.qty ?? 0,
-    'Mob Date (-5d)': p.mobDateComputed || p.mobDate || '',
-    'Start Date': p.startDate || p.actStart || p.expStart || '',
-    'End Date': p.endDate || p.actEnd || p.expEnd || '',
-    'Status': p.status || '',
-    'Assigned Teams': (p.assignedTeams || []).join(', '),
-    'Headcount Slots': p.assignedHeadcount ?? 0,
-    'Assigned Engineer': p.assignedTo || '',
-  }))
-
-  const ws = XLSX.utils.json_to_sheet(rows)
   const wb = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(wb, ws, 'Live Board')
+  const aoa = []
+
+  const thinBorder = {
+    top: { style: 'thin', color: { rgb: 'CBD5E1' } },
+    bottom: { style: 'thin', color: { rgb: 'CBD5E1' } },
+    left: { style: 'thin', color: { rgb: 'CBD5E1' } },
+    right: { style: 'thin', color: { rgb: 'CBD5E1' } },
+  }
+
+  const CAT_THEMES = {
+    'Expansion Joint': { bg: 'F3F0FF', color: '6C5CE7', borderColor: '6C5CE7' },
+    'DEMI': { bg: 'EBF4FF', color: '1A6FC4', borderColor: '1A6FC4' },
+    'EDG': { bg: 'E6F4EA', color: '15803D', borderColor: '15803D' },
+    'COA': { bg: 'FEF7E0', color: 'B45309', borderColor: 'D97706' },
+    'Oil Spill': { bg: 'E6FFFA', color: '00B894', borderColor: '00B894' },
+    'All': { bg: 'E0F2F1', color: '0D9488', borderColor: '0D9488' },
+  }
+  try {
+    getCategories().forEach(c => {
+      const catKey = c.category || c.name || c.code
+      if (!CAT_THEMES[catKey]) {
+        const hex = (c.color || '#1a6fc4').replace('#', '').toUpperCase()
+        CAT_THEMES[catKey] = { bg: 'F8FAFC', color: hex, borderColor: hex }
+      }
+    })
+  } catch {}
+
+  // ----------------------------------------------------
+  // SECTION 1: TOP 7 KPI CARDS
+  // ----------------------------------------------------
+  aoa.push([
+    'ACTIVE PROJECTS',
+    'PENDING PROJECTS',
+    'COMPLETED PROJECTS',
+    'DEPLOYED SLOTS',
+    'TOTAL WORKFORCE',
+    'IDLE / AVAILABLE',
+    'SHORTFALL ALERTS',
+  ])
+  aoa.push([
+    kp.active ?? 0,
+    kp.pending ?? 0,
+    kp.completed ?? 0,
+    kp.deployed ?? 0,
+    kp.total ?? 0,
+    kp.idle ?? 0,
+    kp.shortfalls ?? 0,
+  ])
+  aoa.push([
+    'With live start dates',
+    'Awaiting scheduling',
+    'Actual end date passed',
+    'Committed to active jobs',
+    'Total workforce pool',
+    'In office / Standby',
+    'Projects with 0 staff',
+  ])
+
+  // Blank separator rows
+  aoa.push([])
+  aoa.push([])
+
+  // ----------------------------------------------------
+  // SECTION 2: CATEGORY WORKFORCE POOL & TEAM DEPLOYMENT STATUS (CARD LAYOUT)
+  // ----------------------------------------------------
+  const sec2TitleRow = aoa.length
+  aoa.push([
+    'CATEGORY WORKFORCE POOL & TEAM DEPLOYMENT STATUS',
+  ])
+  aoa.push([
+    `Live deployment tracking across all 5 workforce categories (${kp.total ?? 0} Total Positions • ${kp.deployed ?? 0} On-Site • ${kp.idle ?? 0} Office Standby)`,
+  ])
+  aoa.push([]) // small blank row
+
+  const sec2CatRows = []
+
+  pl.forEach(pool => {
+    const nextStandby = (pool.teamCards || []).find(tc => tc.status !== 'Deployed')?.name
+    const depTeamsCount = pool.committedTeams?.length || 0
+    const stbyTeamsCount = pool.availableTeams?.length || 0
+
+    const catCardText = `● ${pool.category.toUpperCase()} (${pool.totalPool} Slots)\n🚀 DEPLOYED: ${pool.committed} (${depTeamsCount}T)\n🏢 STANDBY: ${pool.available} (${stbyTeamsCount}T)`
+
+    const row = [catCardText]
+
+    ;(pool.teamCards || []).forEach(tc => {
+      const isDep = tc.status === 'Deployed'
+      const isNextReady = !isDep && tc.name === nextStandby
+      const statusLine = isDep
+        ? `🚀 ${tc.activeJob}`
+        : isNextReady
+        ? `⚡ Next Ready (Office)`
+        : `🏢 In Office`
+
+      const teamCardText = `Team ${tc.name}  (${tc.totalSlots} Slots)\n${tc.actualStaff} Staff\n${statusLine}`
+      row.push(teamCardText)
+    })
+
+    sec2CatRows.push({
+      rowIndex: aoa.length,
+      category: pool.category,
+      teamCards: pool.teamCards || [],
+      nextStandby,
+    })
+    aoa.push(row)
+    aoa.push([]) // spacing row between category cards
+  })
+
+  // Blank separator rows
+  aoa.push([])
+
+  // ----------------------------------------------------
+  // SECTION 3: PROJECT ASSIGNMENT BOARD (FULL 21 COLUMNS)
+  // ----------------------------------------------------
+  const sec3TitleRow = aoa.length
+  aoa.push([
+    'PROJECT ASSIGNMENT BOARD',
+  ])
+  aoa.push([
+    `${prjs.length} of ${prjs.length} projects displayed`,
+  ])
+  const sec3HeaderRow = aoa.length
+  const prjHeaders = [
+    '#',
+    'JOB CARD NO',
+    'CONTRACT NO',
+    'SERVICE ORDER',
+    'PROJECT CODE',
+    'CATEGORY',
+    'LOCATION',
+    'DESCRIPTION',
+    'UNIT',
+    'QTY',
+    'MOB DATE (-5D)',
+    'EXP START',
+    'EXP END',
+    'ACT START',
+    'ACT END',
+    'ASSIGNED TO',
+    'ASSIGNED TEAMS',
+    'REMARKS',
+    'STATUS',
+    'HEADCOUNT SLOTS',
+    'ASSIGNED ROSTER',
+  ]
+  aoa.push(prjHeaders)
+
+  const numPrjCols = prjHeaders.length // 21
+  const sec3DataStart = aoa.length
+
+  prjs.forEach((p, idx) => {
+    const rosterStr = (p.assignedEmps && p.assignedEmps.length > 0)
+      ? p.assignedEmps.map((e, eIdx) => {
+          const isNeed = e.empId === 'Need' || (e.nameEn || '').toLowerCase().startsWith('need')
+          const nameEn = isNeed ? 'Open Need (Temporary Slot)' : (e.nameEn || '—')
+          const nameAr = (!isNeed && e.nameAr) ? ` (${e.nameAr})` : ''
+          const role = e.jobCat ? ` · ${e.jobCat}` : ''
+          const slot = isNeed ? ' [Need]' : ' [Perm]'
+          const veh = (e.vehicleType && e.vehicleType !== '-') ? ` · Veh: ${e.vehicleType}` : ''
+          const plate = (e.plate && e.plate !== '-') ? ` (${e.plate})` : ''
+          return `${eIdx + 1}. [${e.empId}] ${nameEn}${nameAr} · Team ${e.team || '—'}${role}${slot}${veh}${plate}`
+        }).join('\n')
+      : (p.assignedHeadcount > 0 ? `${p.assignedHeadcount} slots` : '—')
+
+    const assignedTeamsStr = (p.assignedTeams && p.assignedTeams.length > 0)
+      ? p.assignedTeams.map(t => `Team ${t.replace(/team/i, '').trim()}`).join(', ')
+      : (p.team ? `Team ${p.team.replace(/team/i, '').trim()}` : '—')
+
+    aoa.push([
+      idx + 1,
+      p.jobCard || '',
+      p.contract || '',
+      p.serviceOrder || '',
+      p.project || '',
+      p.category || '',
+      p.location || '',
+      p.desc || '',
+      p.unit || '',
+      p.productQty ?? p.qty ?? 0,
+      p.mobDateComputed || p.mobDate || '',
+      p.expStart || '',
+      p.expEnd || '',
+      p.actStart || '',
+      p.actEnd || '',
+      p.assignedTo || '',
+      assignedTeamsStr,
+      p.remarks || '',
+      p.status || '',
+      p.assignedHeadcount > 0 ? `${p.assignedHeadcount} slots` : '—',
+      rosterStr,
+    ])
+  })
+
+  const ws = XLSX.utils.aoa_to_sheet(aoa)
+
+  // Merges for Dashboard Sheet
+  ws['!merges'] = [
+    { s: { r: sec2TitleRow, c: 0 }, e: { r: sec2TitleRow, c: numPrjCols - 1 } },
+    { s: { r: sec2TitleRow + 1, c: 0 }, e: { r: sec2TitleRow + 1, c: numPrjCols - 1 } },
+    { s: { r: sec3TitleRow, c: 0 }, e: { r: sec3TitleRow, c: numPrjCols - 1 } },
+    { s: { r: sec3TitleRow + 1, c: 0 }, e: { r: sec3TitleRow + 1, c: numPrjCols - 1 } },
+  ]
+
+  // 1. Style Section 1: Top 7 KPI Cards
+  const kpiStyles = [
+    { bg: 'E6F4EA', color: '137333' }, // Active (Green)
+    { bg: 'FEF7E0', color: 'B06000' }, // Pending (Amber)
+    { bg: 'EEF2FF', color: '3730A3' }, // Completed (Indigo)
+    { bg: 'E8F0FE', color: '1A73E8' }, // Deployed (Blue)
+    { bg: 'F3E8FD', color: '8430CE' }, // Total (Purple)
+    { bg: 'E0F2F1', color: '00796B' }, // Idle (Teal)
+    { bg: kp.shortfalls > 0 ? 'FCE8E6' : 'E6F4EA', color: kp.shortfalls > 0 ? 'C5221F' : '137333' }, // Shortfall (Red/Green)
+  ]
+
+  for (let c = 0; c < 7; c++) {
+    const refTitle = XLSX.utils.encode_cell({ r: 0, c })
+    const refVal = XLSX.utils.encode_cell({ r: 1, c })
+    const refSub = XLSX.utils.encode_cell({ r: 2, c })
+    const st = kpiStyles[c] || kpiStyles[0]
+
+    if (ws[refTitle]) {
+      ws[refTitle].s = {
+        fill: { fgColor: { rgb: st.bg } },
+        font: { bold: true, color: { rgb: st.color }, sz: 10 },
+        alignment: { horizontal: 'center', vertical: 'center' },
+        border: thinBorder,
+      }
+    }
+    if (ws[refVal]) {
+      ws[refVal].s = {
+        fill: { fgColor: { rgb: st.bg } },
+        font: { bold: true, color: { rgb: st.color }, sz: 18 },
+        alignment: { horizontal: 'center', vertical: 'center' },
+        border: thinBorder,
+      }
+    }
+    if (ws[refSub]) {
+      ws[refSub].s = {
+        fill: { fgColor: { rgb: st.bg } },
+        font: { italic: true, color: { rgb: st.color }, sz: 9 },
+        alignment: { horizontal: 'center', vertical: 'center' },
+        border: thinBorder,
+      }
+    }
+  }
+
+  // 2. Style Section 2: Category Workforce Pool & Team Deployment Status (Card Boxes)
+  const sec2TitleRef = XLSX.utils.encode_cell({ r: sec2TitleRow, c: 0 })
+  if (ws[sec2TitleRef]) {
+    ws[sec2TitleRef].s = {
+      fill: { fgColor: { rgb: '1A365D' } },
+      font: { bold: true, color: { rgb: 'FFFFFF' }, sz: 11.5 },
+      alignment: { vertical: 'center', horizontal: 'left' },
+    }
+  }
+  const sec2SubRef = XLSX.utils.encode_cell({ r: sec2TitleRow + 1, c: 0 })
+  if (ws[sec2SubRef]) {
+    ws[sec2SubRef].s = {
+      fill: { fgColor: { rgb: '1A365D' } },
+      font: { bold: true, color: { rgb: 'E2E8F0' }, sz: 9.5 },
+      alignment: { vertical: 'center', horizontal: 'left' },
+    }
+  }
+
+  // Section 2 Category and Team Cards
+  sec2CatRows.forEach(catInfo => {
+    const r = catInfo.rowIndex
+    const theme = CAT_THEMES[catInfo.category] || { bg: 'F8FAFC', color: '1E293B', borderColor: 'CBD5E1' }
+
+    // Col 0: Category Identity Card Box
+    const refCat = XLSX.utils.encode_cell({ r, c: 0 })
+    if (ws[refCat]) {
+      ws[refCat].s = {
+        fill: { fgColor: { rgb: theme.bg } },
+        font: { sz: 9.5, bold: true, color: { rgb: theme.color } },
+        alignment: { vertical: 'center', horizontal: 'left', wrapText: true },
+        border: {
+          top: { style: 'medium', color: { rgb: theme.borderColor } },
+          bottom: { style: 'medium', color: { rgb: theme.borderColor } },
+          left: { style: 'medium', color: { rgb: theme.borderColor } },
+          right: { style: 'medium', color: { rgb: theme.borderColor } },
+        },
+      }
+    }
+
+    // Col 1..N: Individual Team Cards
+    catInfo.teamCards.forEach((tc, tIdx) => {
+      const c = tIdx + 1
+      const refTeam = XLSX.utils.encode_cell({ r, c })
+      if (ws[refTeam]) {
+        const isDep = tc.status === 'Deployed'
+        const isNextReady = !isDep && tc.name === catInfo.nextStandby
+
+        let cardBg = 'F8FAFC'
+        let cardBorderColor = 'CBD5E1'
+        let cardTextColor = '334155'
+
+        if (isDep) {
+          cardBg = 'EBF4FF'
+          cardBorderColor = '93C5FD'
+          cardTextColor = '1E40AF'
+        } else if (isNextReady) {
+          cardBg = 'F0FDF4'
+          cardBorderColor = '86EFAC'
+          cardTextColor = '15803D'
+        }
+
+        ws[refTeam].s = {
+          fill: { fgColor: { rgb: cardBg } },
+          font: { sz: 9.5, bold: isDep || isNextReady, color: { rgb: cardTextColor } },
+          alignment: { vertical: 'center', horizontal: 'center', wrapText: true },
+          border: {
+            top: { style: 'thin', color: { rgb: cardBorderColor } },
+            bottom: { style: 'thin', color: { rgb: cardBorderColor } },
+            left: { style: 'thin', color: { rgb: cardBorderColor } },
+            right: { style: 'thin', color: { rgb: cardBorderColor } },
+          },
+        }
+      }
+    })
+  })
+
+  // 3. Style Section 3: Project Assignment Board (Full 21 Columns)
+  const sec3TitleRef = XLSX.utils.encode_cell({ r: sec3TitleRow, c: 0 })
+  if (ws[sec3TitleRef]) {
+    ws[sec3TitleRef].s = {
+      fill: { fgColor: { rgb: '1A365D' } },
+      font: { bold: true, color: { rgb: 'FFFFFF' }, sz: 11.5 },
+      alignment: { vertical: 'center', horizontal: 'left' },
+    }
+  }
+  const sec3SubRef = XLSX.utils.encode_cell({ r: sec3TitleRow + 1, c: 0 })
+  if (ws[sec3SubRef]) {
+    ws[sec3SubRef].s = {
+      fill: { fgColor: { rgb: '1A365D' } },
+      font: { bold: true, color: { rgb: 'E2E8F0' }, sz: 9.5 },
+      alignment: { vertical: 'center', horizontal: 'left' },
+    }
+  }
+
+  // Section 3 Column Headers (All 21 Columns)
+  for (let c = 0; c < numPrjCols; c++) {
+    const ref = XLSX.utils.encode_cell({ r: sec3HeaderRow, c })
+    if (ws[ref]) {
+      ws[ref].s = {
+        fill: { fgColor: { rgb: '1A6FC4' } },
+        font: { bold: true, color: { rgb: 'FFFFFF' }, sz: 10 },
+        alignment: { vertical: 'center', horizontal: 'center', wrapText: true },
+        border: thinBorder,
+      }
+    }
+  }
+
+  // Section 3 Data Rows
+  for (let i = 0; i < prjs.length; i++) {
+    const r = sec3DataStart + i
+    const p = prjs[i]
+    const rowBg = i % 2 === 0 ? 'FFFFFF' : 'F8FAFC'
+    const catTheme = CAT_THEMES[p.category] || { bg: rowBg, color: '1E293B' }
+    const isActive = p.status === 'Active'
+    const isCompleted = p.status === 'Completed'
+
+    for (let c = 0; c < numPrjCols; c++) {
+      const ref = XLSX.utils.encode_cell({ r, c })
+      if (ws[ref]) {
+        // Alignment: Center for IDs, numbers, codes, dates, and status
+        const isCenterCol = [0, 1, 2, 3, 4, 8, 9, 10, 11, 12, 13, 14, 18, 19].includes(c)
+        let cellBg = rowBg
+        let cellColor = '1E293B'
+        let isBold = false
+
+        if (c === 0) {
+          cellColor = '64748B'
+        } else if (c === 1) {
+          // Job Card No
+          isBold = true
+          cellColor = '0F172A'
+        } else if (c === 4) {
+          // Project Code
+          cellColor = '1A6FC4'
+          isBold = true
+        } else if (c === 5) {
+          // Category
+          cellColor = catTheme.color
+          isBold = true
+        } else if (c === 16) {
+          // Assigned Teams
+          isBold = true
+          cellColor = '0F172A'
+        } else if (c === 18) {
+          // Status Badge
+          isBold = true
+          if (isCompleted) {
+            cellBg = 'EEF2FF'
+            cellColor = '3730A3'
+          } else if (isActive) {
+            cellBg = 'DCFCE7'
+            cellColor = '15803D'
+          } else {
+            cellBg = 'FEF3C7'
+            cellColor = 'B45309'
+          }
+        } else if (c === 19) {
+          // Headcount Slots
+          cellColor = isActive ? '1A6FC4' : (isCompleted ? '4F46E5' : '64748B')
+          isBold = true
+        }
+
+        ws[ref].s = {
+          fill: { fgColor: { rgb: cellBg } },
+          font: { sz: c === 20 ? 9 : 9.5, bold: isBold, color: { rgb: cellColor } },
+          alignment: {
+            vertical: 'center',
+            horizontal: isCenterCol ? 'center' : 'left',
+            wrapText: [7, 17, 20].includes(c),
+          },
+          border: thinBorder,
+        }
+      }
+    }
+  }
+
+  // Set Row Heights (Padding)
+  const rowHeights = [
+    { hpt: 24 }, // Row 0: KPI Titles
+    { hpt: 30 }, // Row 1: KPI Values
+    { hpt: 20 }, // Row 2: KPI Subtitles
+    { hpt: 12 }, // Row 3: Blank
+    { hpt: 12 }, // Row 4: Blank
+    { hpt: 26 }, // Row 5: Section 2 Title
+    { hpt: 18 }, // Row 6: Section 2 Subtitle
+    { hpt: 10 }, // Row 7: Blank
+  ]
+
+  sec2CatRows.forEach(cRow => {
+    rowHeights[cRow.rowIndex] = { hpt: 54 } // Card row height
+    rowHeights[cRow.rowIndex + 1] = { hpt: 8 } // Spacing row height
+  })
+
+  rowHeights[sec3TitleRow] = { hpt: 26 }
+  rowHeights[sec3TitleRow + 1] = { hpt: 18 }
+  rowHeights[sec3HeaderRow] = { hpt: 28 }
+  for (let i = 0; i < prjs.length; i++) {
+    const empCount = prjs[i].assignedEmps?.length || 1
+    rowHeights[sec3DataStart + i] = { hpt: Math.max(34, Math.min(180, empCount * 18)) }
+  }
+  ws['!rows'] = rowHeights
+
+  // Set column widths matching all 21 columns
+  ws['!cols'] = [
+    { wch: 6 },   // Col 0: #
+    { wch: 16 },  // Col 1: Job Card No
+    { wch: 16 },  // Col 2: Contract No
+    { wch: 16 },  // Col 3: Service Order
+    { wch: 18 },  // Col 4: Project Code
+    { wch: 20 },  // Col 5: Category
+    { wch: 18 },  // Col 6: Location
+    { wch: 38 },  // Col 7: Description (wrapped)
+    { wch: 10 },  // Col 8: Unit
+    { wch: 10 },  // Col 9: Qty
+    { wch: 16 },  // Col 10: Mob Date (-5d)
+    { wch: 14 },  // Col 11: Exp Start
+    { wch: 14 },  // Col 12: Exp End
+    { wch: 14 },  // Col 13: Act Start
+    { wch: 14 },  // Col 14: Act End
+    { wch: 18 },  // Col 15: Assigned To
+    { wch: 20 },  // Col 16: Assigned Teams
+    { wch: 24 },  // Col 17: Remarks (wrapped)
+    { wch: 14 },  // Col 18: Status
+    { wch: 16 },  // Col 19: Headcount Slots
+    { wch: 65 },  // Col 20: Assigned Roster (wrapped)
+  ]
+
+  XLSX.utils.book_append_sheet(wb, ws, 'Dashboard')
   XLSX.writeFile(wb, 'Pioneer_Technical_Dashboard.xlsx')
 }
 
 export async function exportProjectsData(projects = []) {
-  try {
-    let res = await fetch(BASE + '/export/projects')
-    if (!res.ok && typeof window !== 'undefined' && window.location.hostname === 'localhost') {
-      res = await fetch(BACKEND_DIRECT + '/export/projects')
-    }
-    if (res.ok) {
-      const blob = await res.blob()
-      downloadBlob(blob, 'Pioneer_Projects.xlsx')
-      return
-    }
-  } catch {
-    // Client-side fallback
+  const prjs = projects || []
+  const wb = XLSX.utils.book_new()
+  const formattedNow = new Date().toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })
+
+  const thinBorder = {
+    top: { style: 'thin', color: { rgb: 'CBD5E1' } },
+    bottom: { style: 'thin', color: { rgb: 'CBD5E1' } },
+    left: { style: 'thin', color: { rgb: 'CBD5E1' } },
+    right: { style: 'thin', color: { rgb: 'CBD5E1' } },
   }
 
-  const rows = (projects || []).map((p, idx) => ({
-    'S/NO': idx + 1,
-    'Job Card No': p.jobCard || '',
-    'Project Code': p.project || '',
-    'Location': p.location || '',
-    'Description': p.desc || '',
-    'Unit': p.unit || '',
-    'Product Qty': p.qty ?? 0,
-    'Mob Date': p.mobDate || '',
-    'Actual Start': p.actStart || '',
-    'Actual End': p.actEnd || '',
-    'Status': (p.actStart || p.expStart) ? 'Active' : 'Pending',
-    'Assigned Engineer': p.assignedTo || '',
-    'Teams': p.team || '',
-    'Remarks': p.remarks || '',
-  }))
+  const aoa = []
+  aoa.push(['PIONEER TECHNICAL SERVICES - MASTER PROJECTS REGISTER'])
+  aoa.push([`Total Projects: ${prjs.length}  •  Export Date: ${formattedNow}`])
+  aoa.push([])
 
-  const ws = XLSX.utils.json_to_sheet(rows)
-  const wb = XLSX.utils.book_new()
+  const headers = [
+    'S/NO',
+    'JOB CARD NO',
+    'CONTRACT NO',
+    'SERVICE ORDER',
+    'PROJECT CODE',
+    'CATEGORY',
+    'LOCATION',
+    'DESCRIPTION',
+    'UNIT',
+    'QTY',
+    'MOB DATE (-5D)',
+    'START DATE',
+    'END DATE',
+    'ASSIGNED TO',
+    'STATUS',
+    'ASSIGNED TEAMS',
+    'REMARKS',
+  ]
+  aoa.push(headers)
+
+  const numCols = headers.length
+  const todayStr = new Date().toISOString().split('T')[0]
+
+  prjs.forEach((p, idx) => {
+    const actEnd = (p.actEnd || '').trim()
+    const isCompleted = p.status === 'Completed' || (actEnd && actEnd < todayStr)
+    const isActive = !isCompleted && Boolean(p.actStart || p.expStart)
+    const status = isCompleted ? 'Completed' : (isActive ? 'Active' : 'Pending')
+
+    aoa.push([
+      idx + 1,
+      p.jobCard || '',
+      p.contract || '',
+      p.serviceOrder || '',
+      p.project || '',
+      p.category || '',
+      p.location || '',
+      p.desc || '',
+      p.unit || '',
+      p.qty ?? 0,
+      p.mobDate || '',
+      p.actStart || p.expStart || '',
+      p.actEnd || p.expEnd || '',
+      p.assignedTo || '',
+      status,
+      p.team || '',
+      p.remarks || '',
+    ])
+  })
+
+  const ws = XLSX.utils.aoa_to_sheet(aoa)
+  ws['!merges'] = [
+    { s: { r: 0, c: 0 }, e: { r: 0, c: numCols - 1 } },
+    { s: { r: 1, c: 0 }, e: { r: 1, c: numCols - 1 } },
+  ]
+
+  const titleRef = XLSX.utils.encode_cell({ r: 0, c: 0 })
+  if (ws[titleRef]) {
+    ws[titleRef].s = {
+      fill: { fgColor: { rgb: '1A365D' } },
+      font: { bold: true, color: { rgb: 'FFFFFF' }, sz: 13 },
+      alignment: { vertical: 'center', horizontal: 'center' },
+    }
+  }
+  const subRef = XLSX.utils.encode_cell({ r: 1, c: 0 })
+  if (ws[subRef]) {
+    ws[subRef].s = {
+      fill: { fgColor: { rgb: '2D3748' } },
+      font: { italic: true, color: { rgb: 'E2E8F0' }, sz: 9.5 },
+      alignment: { vertical: 'center', horizontal: 'center' },
+    }
+  }
+
+  for (let c = 0; c < numCols; c++) {
+    const ref = XLSX.utils.encode_cell({ r: 3, c })
+    if (ws[ref]) {
+      ws[ref].s = {
+        fill: { fgColor: { rgb: '1A6FC4' } },
+        font: { bold: true, color: { rgb: 'FFFFFF' }, sz: 10 },
+        alignment: { vertical: 'center', horizontal: 'center', wrapText: true },
+        border: thinBorder,
+      }
+    }
+  }
+
+  for (let r = 4; r < aoa.length; r++) {
+    const rowBg = (r - 4) % 2 === 0 ? 'FFFFFF' : 'F8FAFC'
+    const statusVal = aoa[r][14]
+
+    for (let c = 0; c < numCols; c++) {
+      const ref = XLSX.utils.encode_cell({ r, c })
+      if (ws[ref]) {
+        const isCenter = [0, 1, 2, 3, 4, 8, 9, 10, 11, 12, 14].includes(c)
+        let cellBg = rowBg
+        let cellColor = '1E293B'
+        let isBold = false
+
+        if (c === 1 || c === 4) {
+          isBold = true
+          cellColor = '1A6FC4'
+        } else if (c === 14) {
+          isBold = true
+          if (statusVal === 'Completed') {
+            cellBg = 'EEF2FF'
+            cellColor = '3730A3'
+          } else if (statusVal === 'Active') {
+            cellBg = 'DCFCE7'
+            cellColor = '15803D'
+          } else {
+            cellBg = 'FEF3C7'
+            cellColor = 'B45309'
+          }
+        }
+
+        ws[ref].s = {
+          fill: { fgColor: { rgb: cellBg } },
+          font: { sz: 9.5, bold: isBold, color: { rgb: cellColor } },
+          alignment: { vertical: 'center', horizontal: isCenter ? 'center' : 'left', wrapText: [7, 16].includes(c) },
+          border: thinBorder,
+        }
+      }
+    }
+  }
+
+  const rowHeights = [{ hpt: 30 }, { hpt: 20 }, { hpt: 10 }, { hpt: 28 }]
+  for (let r = 4; r < aoa.length; r++) {
+    rowHeights[r] = { hpt: 24 }
+  }
+  ws['!rows'] = rowHeights
+
+  ws['!cols'] = [
+    { wch: 6 },   // S/NO
+    { wch: 16 },  // Job Card
+    { wch: 16 },  // Contract
+    { wch: 16 },  // Service Order
+    { wch: 18 },  // Project Code
+    { wch: 20 },  // Category
+    { wch: 18 },  // Location
+    { wch: 38 },  // Description
+    { wch: 10 },  // Unit
+    { wch: 10 },  // Qty
+    { wch: 16 },  // Mob Date
+    { wch: 14 },  // Start Date
+    { wch: 14 },  // End Date
+    { wch: 18 },  // Assigned To
+    { wch: 14 },  // Status
+    { wch: 18 },  // Assigned Teams
+    { wch: 26 },  // Remarks
+  ]
+
   XLSX.utils.book_append_sheet(wb, ws, 'Projects')
   XLSX.writeFile(wb, 'Pioneer_Projects.xlsx')
 }
 
 export async function exportEmployeesData(employees = []) {
-  try {
-    let res = await fetch(BASE + '/export/employees')
-    if (!res.ok && typeof window !== 'undefined' && window.location.hostname === 'localhost') {
-      res = await fetch(BACKEND_DIRECT + '/export/employees')
-    }
-    if (res.ok) {
-      const blob = await res.blob()
-      downloadBlob(blob, 'Pioneer_Workforce.xlsx')
-      return
-    }
-  } catch {
-    // Client-side fallback
+  const emps = employees || []
+  const wb = XLSX.utils.book_new()
+  const formattedNow = new Date().toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })
+
+  const thinBorder = {
+    top: { style: 'thin', color: { rgb: 'CBD5E1' } },
+    bottom: { style: 'thin', color: { rgb: 'CBD5E1' } },
+    left: { style: 'thin', color: { rgb: 'CBD5E1' } },
+    right: { style: 'thin', color: { rgb: 'CBD5E1' } },
   }
 
-  const rows = (employees || []).map((e, idx) => ({
-    'S/NO': idx + 1,
-    'Emp ID': e.empId || '',
-    'Name (EN)': e.nameEn || '',
-    'Name (AR)': e.nameAr || '',
-    'Job Title': e.jobTitle || '',
-    'Category / Project': e.project || '',
-    'Team': e.team || '',
-    'Location': e.location || '',
-    'Maintenance Status': e.status || '',
-  }))
+  const aoa = []
+  aoa.push(['PIONEER TECHNICAL SERVICES - WORKFORCE & FLEET REGISTER'])
+  aoa.push([`Total Workforce: ${emps.length}  •  Export Date: ${formattedNow}`])
+  aoa.push([])
 
-  const ws = XLSX.utils.json_to_sheet(rows)
-  const wb = XLSX.utils.book_new()
+  const headers = [
+    'S/NO',
+    'EMP ID',
+    'NAME (ENGLISH)',
+    'NAME (ARABIC)',
+    'JOB TITLE / ROLE',
+    'PROJECT / CATEGORY',
+    'TEAM',
+    'SLOT TYPE',
+    'VEHICLE TYPE',
+    'PLATE NO',
+    'BRAND',
+    'SECURITY EXPIRY',
+    'VEHICLE MAINTENANCE',
+    'GATE PASS',
+    'TOOLS BOX',
+  ]
+  aoa.push(headers)
+
+  const numCols = headers.length
+
+  emps.forEach((e, idx) => {
+    const isNeed = e.empId === 'Need' || (e.nameEn || '').toLowerCase().startsWith('need')
+    aoa.push([
+      idx + 1,
+      e.empId || '',
+      isNeed ? 'Open Need (Temporary Slot)' : (e.nameEn || ''),
+      isNeed ? '—' : (e.nameAr || ''),
+      e.jobCat || '—',
+      e.project || '',
+      e.team ? `Team ${e.team.replace(/team/i, '').trim()}` : '—',
+      isNeed ? 'Open Need' : 'Permanent',
+      e.vehicleType && e.vehicleType !== '-' ? e.vehicleType : '—',
+      e.plate && e.plate !== '-' ? e.plate : '—',
+      e.brand && e.brand !== '-' ? e.brand : '—',
+      e.secExpiry && e.secExpiry !== '-' ? e.secExpiry : '—',
+      e.vehicleStatus && e.vehicleStatus !== '-' ? e.vehicleStatus : 'OK / Ready',
+      e.gatePass || 'N/A',
+      e.toolsBox || '—',
+    ])
+  })
+
+  const ws = XLSX.utils.aoa_to_sheet(aoa)
+  ws['!merges'] = [
+    { s: { r: 0, c: 0 }, e: { r: 0, c: numCols - 1 } },
+    { s: { r: 1, c: 0 }, e: { r: 1, c: numCols - 1 } },
+  ]
+
+  const titleRef = XLSX.utils.encode_cell({ r: 0, c: 0 })
+  if (ws[titleRef]) {
+    ws[titleRef].s = {
+      fill: { fgColor: { rgb: '1A365D' } },
+      font: { bold: true, color: { rgb: 'FFFFFF' }, sz: 13 },
+      alignment: { vertical: 'center', horizontal: 'center' },
+    }
+  }
+  const subRef = XLSX.utils.encode_cell({ r: 1, c: 0 })
+  if (ws[subRef]) {
+    ws[subRef].s = {
+      fill: { fgColor: { rgb: '2D3748' } },
+      font: { italic: true, color: { rgb: 'E2E8F0' }, sz: 9.5 },
+      alignment: { vertical: 'center', horizontal: 'center' },
+    }
+  }
+
+  for (let c = 0; c < numCols; c++) {
+    const ref = XLSX.utils.encode_cell({ r: 3, c })
+    if (ws[ref]) {
+      ws[ref].s = {
+        fill: { fgColor: { rgb: '1A365D' } },
+        font: { bold: true, color: { rgb: 'FFFFFF' }, sz: 10 },
+        alignment: { vertical: 'center', horizontal: 'center', wrapText: true },
+        border: thinBorder,
+      }
+    }
+  }
+
+  for (let r = 4; r < aoa.length; r++) {
+    const rowBg = (r - 4) % 2 === 0 ? 'FFFFFF' : 'F8FAFC'
+    const isNeedRow = aoa[r][7] === 'Open Need'
+
+    for (let c = 0; c < numCols; c++) {
+      const ref = XLSX.utils.encode_cell({ r, c })
+      if (ws[ref]) {
+        const isCenter = [0, 1, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14].includes(c)
+        let cellBg = rowBg
+        let cellColor = '1E293B'
+        let isBold = false
+
+        if (c === 1) {
+          isBold = true
+          cellColor = '1A6FC4'
+        } else if (c === 2 && isNeedRow) {
+          cellColor = 'B45309'
+          isBold = true
+        } else if (c === 7) {
+          cellBg = isNeedRow ? 'FEF3C7' : 'DCFCE7'
+          cellColor = isNeedRow ? 'B45309' : '15803D'
+          isBold = true
+        }
+
+        ws[ref].s = {
+          fill: { fgColor: { rgb: cellBg } },
+          font: { sz: 9.5, bold: isBold, color: { rgb: cellColor } },
+          alignment: { vertical: 'center', horizontal: isCenter ? 'center' : 'left' },
+          border: thinBorder,
+        }
+      }
+    }
+  }
+
+  const rowHeights = [{ hpt: 30 }, { hpt: 20 }, { hpt: 10 }, { hpt: 28 }]
+  for (let r = 4; r < aoa.length; r++) {
+    rowHeights[r] = { hpt: 22 }
+  }
+  ws['!rows'] = rowHeights
+
+  ws['!cols'] = [
+    { wch: 6 },   // S/NO
+    { wch: 12 },  // Emp ID
+    { wch: 28 },  // Name EN
+    { wch: 22 },  // Name AR
+    { wch: 24 },  // Job Title
+    { wch: 20 },  // Category
+    { wch: 12 },  // Team
+    { wch: 16 },  // Slot Type
+    { wch: 18 },  // Vehicle Type
+    { wch: 14 },  // Plate No
+    { wch: 14 },  // Brand
+    { wch: 16 },  // Security Expiry
+    { wch: 20 },  // Vehicle Maintenance
+    { wch: 14 },  // Gate Pass
+    { wch: 14 },  // Tools Box
+  ]
+
   XLSX.utils.book_append_sheet(wb, ws, 'Workforce')
   XLSX.writeFile(wb, 'Pioneer_Workforce.xlsx')
 }
 
-function downloadBlob(blob, filename) {
-  const url = window.URL.createObjectURL(blob)
+// Backup & Restore payload helpers using Supabase directly
+export async function createBackupPayload() {
+  const [prjsRes, empsRes] = await Promise.all([getProjects(), getEmployees()])
+  const prjs = prjsRes.data || []
+  const emps = empsRes.data || []
+  const now = new Date()
+
+  return {
+    appName: 'Pioneer Technical Resource Management (Supabase Cloud)',
+    version: '2.0',
+    exportedAt: now.toISOString(),
+    formattedDate: now.toLocaleString('en-GB'),
+    metadata: {
+      totalProjects: prjs.length,
+      totalEmployees: emps.length,
+      activeProjects: prjs.filter(p => (p.actStart || p.expStart) && (p.actEnd || p.expEnd)).length,
+    },
+    projects: prjs,
+    employees: emps,
+  }
+}
+
+export async function downloadBackupJSON() {
+  const payload = await createBackupPayload()
+  const jsonStr = JSON.stringify(payload, null, 2)
+  const blob = new Blob([jsonStr], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+
+  const dateTag = new Date().toISOString().split('T')[0]
+  const timeTag = new Date().toTimeString().split(' ')[0].replace(/:/g, '-')
+  const filename = `Pioneer_Cloud_Backup_${dateTag}_${timeTag}.json`
+
   const a = document.createElement('a')
   a.style.display = 'none'
   a.href = url
   a.download = filename
   document.body.appendChild(a)
   a.click()
-  window.URL.revokeObjectURL(url)
+  URL.revokeObjectURL(url)
   document.body.removeChild(a)
+  return { filename, metadata: payload.metadata }
 }
 
-export {
-  resetStoredData,
-  createBackupPayload,
-  downloadBackupJSON,
-  importBackupJSON,
+export async function importBackupJSON(parsedData) {
+  if (!parsedData || typeof parsedData !== 'object') {
+    throw new Error('Invalid JSON format: Content must be a valid JSON object.')
+  }
+
+  let prjsToImport = Array.isArray(parsedData.projects) ? parsedData.projects : Array.isArray(parsedData) ? parsedData : null
+  let empsToImport = Array.isArray(parsedData.employees) ? parsedData.employees : null
+
+  if (!prjsToImport && !empsToImport) {
+    throw new Error('No valid projects or employees data found in this backup file.')
+  }
+
+  if (isSupabaseConfigured && supabase) {
+    if (prjsToImport) {
+      for (const p of prjsToImport) {
+        const dbP = mapProjectToDb(p)
+        if (p.id) {
+          await supabase.from('projects').upsert({ id: p.id, ...dbP })
+        } else {
+          await supabase.from('projects').insert([dbP])
+        }
+      }
+    }
+    if (empsToImport) {
+      for (const e of empsToImport) {
+        const dbE = mapEmployeeToDb(e)
+        if (e.id) {
+          await supabase.from('employees').upsert({ id: e.id, ...dbE })
+        } else {
+          await supabase.from('employees').insert([dbE])
+        }
+      }
+    }
+  } else {
+    if (prjsToImport) {
+      fallbackProjects = prjsToImport
+      saveStoredProjects(fallbackProjects)
+    }
+    if (empsToImport) {
+      fallbackEmployees = empsToImport
+      saveStoredEmployees(fallbackEmployees)
+    }
+  }
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('pt_data_updated', { detail: { type: 'imported' } }))
+  }
+
+  return {
+    success: true,
+    projectsImported: prjsToImport ? prjsToImport.length : 0,
+    employeesImported: empsToImport ? empsToImport.length : 0,
+    exportedAt: parsedData.exportedAt || parsedData.formattedDate || 'Cloud Backup',
+  }
 }
+
+export async function resetStoredData() {
+  if (isSupabaseConfigured && supabase) {
+    await supabase.from('projects').delete().neq('id', 0)
+    await supabase.from('employees').delete().neq('id', 0)
+    for (const p of INITIAL_DATA.projects || []) {
+      await supabase.from('projects').insert([mapProjectToDb(p)])
+    }
+    for (const e of INITIAL_DATA.employees || []) {
+      await supabase.from('employees').insert([mapEmployeeToDb(e)])
+    }
+  } else {
+    fallbackProjects = (INITIAL_DATA.projects || []).map(p => ({ ...p }))
+    fallbackEmployees = (INITIAL_DATA.employees || [])
+      .filter(e => e.empId !== 'Need' && !(e.nameEn || '').toLowerCase().startsWith('need'))
+      .map(e => ({ ...e }))
+    saveStoredProjects(fallbackProjects)
+    saveStoredEmployees(fallbackEmployees)
+  }
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('pt_data_updated', { detail: { type: 'reset' } }))
+  }
+}
+
 export const exportDashboard = exportDashboardData
 export const exportProjects = exportProjectsData
 export const exportEmployees = exportEmployeesData

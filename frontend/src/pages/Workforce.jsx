@@ -5,11 +5,15 @@ import {
   updateEmployee,
   deleteEmployee,
   exportEmployees,
+  subscribeToSupabase,
+  getCategories,
+  getAllTeamsForCategory,
+  getAllSystemTeams,
 } from '../api'
-import { getStoredEmployees } from '../storage'
+import { INITIAL_DATA } from '../seedData'
 
 const COLS = [
-  { key: 'id', label: '#', align: 'center' },
+  { key: 'id', label: 'S/NO', align: 'center' },
   { key: 'empId', label: 'Employee ID', align: 'left' },
   { key: 'nameEn', label: 'Name (EN)', align: 'left' },
   { key: 'nameAr', label: 'Name (AR)', align: 'right' },
@@ -44,9 +48,11 @@ const EMPTY = {
 let translateTimer = null
 
 export default function Workforce({ onOpenBackup }) {
-  const [rows, setRows] = useState(getStoredEmployees)
+  const [rows, setRows] = useState(() => INITIAL_DATA.employees || [])
+  const [categories, setCategories] = useState(() => getCategories())
   const [search, setSearch] = useState('')
   const [fProject, setFProject] = useState('')
+  const [fTeam, setFTeam] = useState('')
   const [fType, setFType] = useState('')
   const [sort, setSort] = useState({ col: null, dir: 'asc' })
   const [showForm, setShowForm] = useState(false)
@@ -56,18 +62,28 @@ export default function Workforce({ onOpenBackup }) {
   const [translating, setTranslating] = useState(false)
 
   const load = useCallback(() => {
-    getEmployees({ search, project: fProject, type: fType })
+    getEmployees()
       .then(d => {
         if (d?.data?.length) setRows(d.data)
       })
       .catch(() => {})
-  }, [search, fProject, fType])
+    setCategories(getCategories())
+  }, [])
 
   useEffect(() => {
     load()
-    const handleStorageUpdate = () => load()
-    window.addEventListener('pt_storage_updated', handleStorageUpdate)
-    return () => window.removeEventListener('pt_storage_updated', handleStorageUpdate)
+    const unsubscribe = subscribeToSupabase(() => load())
+    const handleDataUpdate = () => {
+      load()
+      setCategories(getCategories())
+    }
+    window.addEventListener('pt_data_updated', handleDataUpdate)
+    window.addEventListener('pt_categories_updated', handleDataUpdate)
+    return () => {
+      unsubscribe()
+      window.removeEventListener('pt_data_updated', handleDataUpdate)
+      window.removeEventListener('pt_categories_updated', handleDataUpdate)
+    }
   }, [load])
 
   // Filter
@@ -77,6 +93,10 @@ export default function Workforce({ onOpenBackup }) {
     if (fType === 'actual' && isNeed) return false
     if (fType === 'need' && !isNeed) return false
     if (fProject && e.project !== fProject) return false
+    if (fTeam) {
+      const empTeam = (e.team || '').replace(/team/i, '').trim().toUpperCase()
+      if (empTeam !== fTeam.toUpperCase()) return false
+    }
     if (search) {
       const q = search.toLowerCase()
       const matches =
@@ -148,8 +168,30 @@ export default function Workforce({ onOpenBackup }) {
     }, 600)
   }
 
+  const handleProjectChange = val => {
+    const validTeams = getAllTeamsForCategory(val)
+    setForm(f => {
+      let nextTeam = f.team
+      if (validTeams.length > 0) {
+        if (!validTeams.includes(f.team) && f.team !== '-') {
+          nextTeam = validTeams[0]
+        }
+      } else {
+        nextTeam = '-'
+      }
+      return { ...f, project: val, team: nextTeam }
+    })
+  }
+
   const openNew = () => {
-    setForm(EMPTY)
+    const cats = getCategories()
+    const initialProject = cats[0]?.category || cats[0]?.name || 'Expansion Joint'
+    const initialTeams = getAllTeamsForCategory(initialProject)
+    setForm({
+      ...EMPTY,
+      project: initialProject,
+      team: initialTeams.length > 0 ? initialTeams[0] : '-',
+    })
     setEditId(null)
     setShowForm(true)
   }
@@ -214,7 +256,32 @@ export default function Workforce({ onOpenBackup }) {
       ? 'badge-na'
       : 'badge-not-maintained'
 
-  const projects = [...new Set(rows.map(e => e.project))].filter(Boolean)
+  const projects = [...new Set([...rows.map(e => e.project), ...categories.map(c => c.category || c.name || c.code)].filter(Boolean))].sort()
+  const teams = [
+    ...new Set(
+      rows
+        .map(e => (e.team || '').replace(/team/i, '').trim())
+        .filter(t => t && t !== '-')
+    ),
+  ].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+
+  // Available categories for dropdown in modal
+  const categoryOptions = Array.from(
+    new Set([
+      ...categories.map(c => c.category || c.name || c.code),
+      ...rows.map(e => e.project),
+      form.project,
+    ])
+  ).filter(Boolean)
+
+  // Available teams for selected project/category in modal
+  const selectedCatTeams = form.project ? getAllTeamsForCategory(form.project) : []
+  const availableFormTeams = Array.from(
+    new Set([
+      ...(selectedCatTeams.length > 0 ? selectedCatTeams : getAllSystemTeams()),
+      form.team && form.team !== '-' ? form.team : null,
+    ])
+  ).filter(Boolean).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
 
   return (
     <div className="page">
@@ -244,6 +311,17 @@ export default function Workforce({ onOpenBackup }) {
                 </option>
               ))}
             </select>
+            <select
+              value={fTeam}
+              onChange={e => setFTeam(e.target.value)}
+            >
+              <option value="">All Teams</option>
+              {teams.map(t => (
+                <option key={t} value={t}>
+                  Team {t}
+                </option>
+              ))}
+            </select>
             <select value={fType} onChange={e => setFType(e.target.value)}>
               <option value="">All Headcount Types</option>
               <option value="actual">Actual Workforce</option>
@@ -255,16 +333,6 @@ export default function Workforce({ onOpenBackup }) {
             <button className="btn-export" onClick={() => exportEmployees(rows)}>
               ⬇ Export to Excel
             </button>
-            {onOpenBackup && (
-              <button
-                className="btn-export"
-                style={{ background: '#0f172a', borderColor: '#334155' }}
-                onClick={onOpenBackup}
-                title="Backup & Restore Data (JSON)"
-              >
-                💾 Backup &amp; Sync
-              </button>
-            )}
           </div>
         </div>
 
@@ -295,13 +363,13 @@ export default function Workforce({ onOpenBackup }) {
                   </td>
                 </tr>
               ) : (
-                sorted.map(e => {
+                sorted.map((e, idx) => {
                   const isNeed =
                     e.empId === 'Need' ||
                     e.nameEn?.toLowerCase().startsWith('need')
                   return (
                     <tr key={e.id}>
-                      <td className="td-center">{e.id}</td>
+                      <td className="td-center">{idx + 1}</td>
                       <td className="td-left">
                         {isNeed ? (
                           <span className="badge badge-need">NEED</span>
@@ -405,13 +473,23 @@ export default function Workforce({ onOpenBackup }) {
                 </div>
                 <div className="form-group">
                   <label>Project / Category</label>
-                  <input
+                  <select
                     value={form.project}
-                    onChange={e =>
-                      setForm(f => ({ ...f, project: e.target.value }))
-                    }
-                    placeholder="e.g. Expansion Joint, DEMI, EDG, COA"
-                  />
+                    onChange={e => handleProjectChange(e.target.value)}
+                  >
+                    <option value="">-- Select Project / Category --</option>
+                    {categoryOptions.map(cat => {
+                      const catObj = categories.find(
+                        c => c.category === cat || c.name === cat || c.code === cat
+                      )
+                      const desc = catObj?.description ? ` (${catObj.description})` : ''
+                      return (
+                        <option key={cat} value={cat}>
+                          {cat}{desc}
+                        </option>
+                      )
+                    })}
+                  </select>
                 </div>
                 <div className="form-group">
                   <label>Name (English)</label>
@@ -447,13 +525,19 @@ export default function Workforce({ onOpenBackup }) {
                 </div>
                 <div className="form-group">
                   <label>Team</label>
-                  <input
+                  <select
                     value={form.team}
                     onChange={e =>
                       setForm(f => ({ ...f, team: e.target.value }))
                     }
-                    placeholder="e.g. A, B, C, D, E, I, K, F, G, M, H"
-                  />
+                  >
+                    <option value="-">— None / Unassigned ( - ) —</option>
+                    {availableFormTeams.map(t => (
+                      <option key={t} value={t}>
+                        Team {t}
+                      </option>
+                    ))}
+                  </select>
                 </div>
                 <div className="form-group">
                   <label>Job Category</label>

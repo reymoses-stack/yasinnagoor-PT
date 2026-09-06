@@ -2,20 +2,19 @@
   "name": "pioneer-technical-dashboard",
   "version": "2.0.0",
   "private": true,
-  "description": "Pioneers Technical Co. Ltd. - Project Management & Workforce Live Board",
+  "workspaces": [
+    "frontend"
+  ],
   "scripts": {
-    "dev": "npm --prefix frontend run dev",
     "build": "npm --prefix frontend run build",
-    "preview": "npm --prefix frontend run preview",
-    "backend": "cd backend && go run main.go"
+    "dev": "npm --prefix frontend run dev"
   },
   "keywords": [
     "pioneer-technical",
     "workforce-management",
     "project-dashboard",
     "react",
-    "vite",
-    "golang"
+    "vite"
   ],
   "author": "Pioneers Technical Co. Ltd.",
   "license": "UNLICENSED"

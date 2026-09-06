@@ -30,12 +30,9 @@ export default function BackupModal({ onClose }) {
 
   // Load current stats on mount
   useEffect(() => {
-    try {
-      const payload = createBackupPayload()
-      setExportStats(payload)
-    } catch (e) {
-      console.error('Error generating backup payload:', e)
-    }
+    createBackupPayload()
+      .then(setExportStats)
+      .catch(e => console.error('Error generating backup payload:', e))
   }, [])
 
   // Close on Escape
@@ -55,9 +52,9 @@ export default function BackupModal({ onClose }) {
   )
 
   // --- Export Action ---
-  const handleExport = () => {
+  const handleExport = async () => {
     try {
-      const res = downloadBackupJSON()
+      const res = await downloadBackupJSON()
       setExportedFileName(res.filename)
       setExportSuccess(true)
       setTimeout(() => setExportSuccess(false), 5000)
@@ -125,25 +122,26 @@ export default function BackupModal({ onClose }) {
   }
 
   // --- Confirm Import ---
-  const handleConfirmImport = () => {
+  const handleConfirmImport = async () => {
     if (!parsedData) return
     try {
-      const summary = importBackupJSON(parsedData)
+      const summary = await importBackupJSON(parsedData)
       setImportSummary(summary)
       setImportSuccess(true)
-      // Refresh current export stats in background
-      setExportStats(createBackupPayload())
+      const stats = await createBackupPayload()
+      setExportStats(stats)
     } catch (err) {
       setImportError(err.message)
     }
   }
 
   // --- Factory Reset ---
-  const handleReset = () => {
-    resetStoredData()
+  const handleReset = async () => {
+    await resetStoredData()
     setResetSuccess(true)
     setResetConfirm(false)
-    setExportStats(createBackupPayload())
+    const stats = await createBackupPayload()
+    setExportStats(stats)
     setTimeout(() => {
       setResetSuccess(false)
     }, 4000)

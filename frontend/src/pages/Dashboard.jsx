@@ -1,13 +1,18 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
   getDashboard,
-  updateProject,
-  deleteProject,
   exportDashboard,
-  resetStoredData,
+  computeDashboardFromData,
+  subscribeToSupabase,
+  getCategories,
+  getCategory,
+  getAllTeamsForCategory,
 } from '../api'
-import { getStoredProjects, getStoredEmployees } from '../storage'
+import { INITIAL_DATA } from '../seedData'
 import AssignedModal from '../components/AssignedModal'
+import TeamModal from '../components/TeamModal'
+import KpiDetailModal from '../components/KpiDetailModal'
+import CategoryModal from '../components/CategoryModal'
 
 const categoryColors = {
   DEMI: '#1a6fc4',
@@ -15,28 +20,9 @@ const categoryColors = {
   EDG: '#28a745',
   COA: '#e08c00',
   'Oil Spill': '#00b894',
-  'Oil': '#00b894',
   All: '#00b894',
 }
 
-const CATEGORY_MAP = {
-  Demi: 'DEMI',
-  EXJ: 'Expansion Joint',
-  EDG: 'EDG',
-  COA: 'COA',
-  'Oil Spill': 'Oil Spill',
-  'Oill Spill': 'Oil Spill',
-  'Oil': 'Oil Spill',
-  'Oill': 'Oil Spill',
-}
-
-function getCategory(code) {
-  if (!code) return 'All'
-  const trimmed = code.trim()
-  return CATEGORY_MAP[trimmed] || trimmed || 'All'
-}
-
-// Auto-calculate date 5 days before given date
 function calc5DaysPrior(dateStr) {
   if (!dateStr) return ''
   const d = new Date(dateStr)
@@ -45,258 +31,71 @@ function calc5DaysPrior(dateStr) {
   return d.toISOString().split('T')[0]
 }
 
-// Client fallback helper for initial render (all 85 positions including Needs)
-function computeFallbackData() {
-  const emps = getStoredEmployees()
-  const prjs = getStoredProjects()
-
-  const catTeams = {}
-  emps.forEach(e => {
-    const c = getCategory(e.project)
-    const t = (e.team || '').trim()
-    if (!catTeams[c]) catTeams[c] = new Set()
-    if (t && t !== '-') catTeams[c].add(t)
-  })
-
-  // Baseline team pools for all categories
-  if (!catTeams['Expansion Joint'] || catTeams['Expansion Joint'].size === 0) {
-    catTeams['Expansion Joint'] = new Set(['A', 'B', 'C', 'D', 'E'])
-  }
-  if (!catTeams['EDG'] || catTeams['EDG'].size === 0) {
-    catTeams['EDG'] = new Set(['F', 'G', 'M'])
-  }
-  if (!catTeams['DEMI'] || catTeams['DEMI'].size === 0) {
-    catTeams['DEMI'] = new Set(['I', 'K'])
-  }
-  if (!catTeams['COA'] || catTeams['COA'].size === 0) {
-    catTeams['COA'] = new Set(['H'])
-  }
-  if (!catTeams['Oil Spill'] || catTeams['Oil Spill'].size === 0) {
-    catTeams['Oil Spill'] = new Set(['A'])
-  }
-
-  // 1. Group active projects by category (Active when start date is set)
-  const catActiveProjects = {}
-  prjs.forEach(p => {
-    const s = p.actStart || p.expStart || ''
-    if (s) {
-      const cat = getCategory(p.project)
-      if (!catActiveProjects[cat]) catActiveProjects[cat] = []
-      catActiveProjects[cat].push(p)
-    }
-  })
-
-  // 2. Pre-calculate assigned teams
-  const projectAssignedTeams = {}
-  const usedTeams = {}
-  ;['DEMI', 'Expansion Joint', 'EDG', 'COA', 'Oil Spill', 'All'].forEach(cat => {
-    usedTeams[cat] = new Map()
-  })
-
-  Object.entries(catActiveProjects).forEach(([cat, activeList]) => {
-    const allCatTeams = Array.from(catTeams[cat] || []).sort()
-    if (!allCatTeams.length || !activeList.length) return
-
-    if (activeList.length === 1) {
-      const p1 = activeList[0]
-      const explicit = (p1.team || '')
-        .split(',')
-        .map(t => t.replace(/team/i, '').trim())
-        .filter(Boolean)
-      if (explicit.length > 0) {
-        projectAssignedTeams[p1.id] = explicit
-        explicit.forEach(t => usedTeams[cat].set(t, p1.jobCard))
-      } else {
-        projectAssignedTeams[p1.id] = allCatTeams
-        allCatTeams.forEach(t => usedTeams[cat].set(t, p1.jobCard))
-      }
-    } else {
-      const p1 = activeList[0]
-      const claimedBySubsequent = new Set()
-
-      for (let i = 1; i < activeList.length; i++) {
-        const pi = activeList[i]
-        const explicit = (pi.team || '')
-          .split(',')
-          .map(t => t.replace(/team/i, '').trim())
-          .filter(Boolean)
-        if (explicit.length > 0) {
-          projectAssignedTeams[pi.id] = explicit
-          explicit.forEach(t => {
-            claimedBySubsequent.add(t)
-            usedTeams[cat].set(t, pi.jobCard)
-          })
-        } else {
-          let chosen = ''
-          for (let teamIdx = 1; teamIdx < allCatTeams.length; teamIdx++) {
-            const tCandidate = allCatTeams[teamIdx]
-            if (!claimedBySubsequent.has(tCandidate)) {
-              chosen = tCandidate
-              break
-            }
-          }
-          if (!chosen) {
-            for (const tCandidate of allCatTeams) {
-              if (!claimedBySubsequent.has(tCandidate)) {
-                chosen = tCandidate
-                break
-              }
-            }
-          }
-          if (chosen) {
-            claimedBySubsequent.add(chosen)
-            projectAssignedTeams[pi.id] = [chosen]
-            usedTeams[cat].set(chosen, pi.jobCard)
-          }
-        }
-      }
-
-      // P1 gets Team A + ALL remaining unpeeled teams
-      const explicit1 = (p1.team || '')
-        .split(',')
-        .map(t => t.replace(/team/i, '').trim())
-        .filter(Boolean)
-      if (explicit1.length > 0) {
-        const p1Teams = explicit1.filter(t => !claimedBySubsequent.has(t))
-        projectAssignedTeams[p1.id] = p1Teams
-        p1Teams.forEach(t => usedTeams[cat].set(t, p1.jobCard))
-      } else {
-        const p1Teams = allCatTeams.filter(t => !claimedBySubsequent.has(t))
-        projectAssignedTeams[p1.id] = p1Teams
-        p1Teams.forEach(t => usedTeams[cat].set(t, p1.jobCard))
-      }
-    }
-  })
-
-  const details = prjs.map(p => {
-    const cat = getCategory(p.project)
-    const s = p.actStart || p.expStart || ''
-    const e = p.actEnd || p.expEnd || ''
-    const status = s ? 'Active' : 'Pending'
-    const computedMob = p.mobDate || calc5DaysPrior(s)
-
-    const allTeams = Array.from(catTeams[cat] || []).sort()
-    const assignedTeams = projectAssignedTeams[p.id] || []
-    let assignedEmps = []
-
-    if (status === 'Active') {
-      assignedEmps = emps.filter(
-        emp =>
-          (cat === 'All' || emp.project === cat) &&
-          assignedTeams.includes((emp.team || '').trim())
-      )
-    }
-
-    const availAfter = allTeams.filter(t => !usedTeams[cat]?.has(t))
-
-    return {
-      ...p,
-      category: cat,
-      status,
-      startDate: s,
-      endDate: e,
-      mobDateComputed: computedMob,
-      assignedTeams,
-      availableTeams: availAfter,
-      allCategoryTeams: allTeams,
-      assignedHeadcount: assignedEmps.length,
-      assignedEmps,
-      productQty: p.qty ?? 0,
-    }
-  })
-
-  const activeCount = details.filter(p => p.status === 'Active').length
-  const pendingCount = details.filter(p => p.status === 'Pending').length
-  const deployedCount = details
-    .filter(p => p.status === 'Active')
-    .reduce((s, p) => s + p.assignedHeadcount, 0)
-  const totalWorkforce = emps.length
-  const idleCount = totalWorkforce - deployedCount
-  const shortfallCount = details.filter(
-    p => p.status === 'Active' && p.assignedHeadcount === 0
-  ).length
-
-  const poolStats = ['Expansion Joint', 'EDG', 'DEMI', 'COA', 'Oil Spill', 'All'].map(
-    cat => {
-      const allTeams = Array.from(catTeams[cat] || []).sort()
-      const totalStaff = emps.filter(
-        emp => cat === 'All' || emp.project === cat
-      ).length
-
-      const teamCards = allTeams.map(t => {
-        const tEmps = emps.filter(
-          emp =>
-            (cat === 'All' || emp.project === cat) &&
-            (emp.team || '').trim() === t
-        )
-        const tot = tEmps.length
-        let actual = 0,
-          needs = 0
-        tEmps.forEach(e => {
-          if (
-            e.empId === 'Need' ||
-            (e.nameEn || '').toLowerCase().startsWith('need')
-          )
-            needs++
-          else actual++
-        })
-
-        const activeJob =
-          (cat === 'All'
-            ? usedTeams['Expansion Joint']?.get(t) ||
-              usedTeams['EDG']?.get(t) ||
-              usedTeams['DEMI']?.get(t) ||
-              usedTeams['COA']?.get(t) ||
-              usedTeams['All']?.get(t)
-            : usedTeams[cat]?.get(t)) || ''
-        return {
-          name: t,
-          totalSlots: tot,
-          actualStaff: actual,
-          needSlots: needs,
-          status: activeJob ? 'Deployed' : 'Office / Standby',
-          activeJob,
-        }
-      })
-
-      const comStaff = teamCards
-        .filter(tc => tc.status === 'Deployed')
-        .reduce((sum, tc) => sum + tc.totalSlots, 0)
-      const comTeams = teamCards
-        .filter(tc => tc.status === 'Deployed')
-        .map(tc => tc.name)
-      const availTeams = teamCards
-        .filter(tc => tc.status !== 'Deployed')
-        .map(tc => tc.name)
-
-      return {
-        category: cat,
-        totalPool: totalStaff,
-        totalTeams: allTeams,
-        committedTeams: comTeams,
-        availableTeams: availTeams,
-        committed: comStaff,
-        available: totalStaff - comStaff,
-        teamCards,
-      }
-    }
-  )
-
-  return {
-    kpis: {
-      active: activeCount,
-      pending: pendingCount,
-      deployed: deployedCount,
-      total: totalWorkforce,
-      idle: idleCount,
-      shortfalls: shortfallCount,
-    },
-    pools: poolStats,
-    projects: details,
+function fmtDate(d) {
+  if (!d) return '—'
+  try {
+    const dt = new Date(d)
+    if (isNaN(dt.getTime())) return d
+    return dt.toISOString().split('T')[0]
+  } catch {
+    return d
   }
 }
 
-const fallback = computeFallbackData()
+function getBusyTeamsForCategory(category, excludeId, projectList = []) {
+  const busyMap = {}
+  const allCat = getAllTeamsForCategory(category, projectList)
+
+  const otherProjects = (projectList || []).filter(
+    other =>
+      other.id !== excludeId &&
+      (other.status === 'Active' || other.actStart || other.expStart || other.team) &&
+      (other.category || getCategory(other.project)) === category
+  )
+
+  if (otherProjects.length > 0) {
+    const firstOther = otherProjects[0]
+
+    otherProjects.forEach(p => {
+      const explicit = (p.team || '')
+        .split(',')
+        .map(t => t.replace(/team/i, '').trim())
+        .filter(Boolean)
+
+      if (p === firstOther) {
+        // The first project in this category is the primary absorber (allocated all teams initially).
+        // If it was manually set to a smaller subset, lock that subset.
+        if (explicit.length > 0 && explicit.length < allCat.length) {
+          explicit.forEach(t => {
+            busyMap[t] = p.jobCard || `Project #${p.id}`
+          })
+        } else {
+          // Otherwise, it only locks its primary base team (Team A)!
+          // All helper teams (Team B, Team C, Team D, Team E) stay AVAILABLE for subsequent projects!
+          const baseTeam = allCat[0] || 'A'
+          busyMap[baseTeam] = p.jobCard || `Project #${p.id}`
+        }
+      } else {
+        // Subsequent projects lock their chosen teams
+        if (explicit.length > 0) {
+          explicit.forEach(t => {
+            busyMap[t] = p.jobCard || `Project #${p.id}`
+          })
+        } else if (p.assignedTeams && p.assignedTeams.length > 0) {
+          p.assignedTeams.forEach(t => {
+            busyMap[t] = p.jobCard || `Project #${p.id}`
+          })
+        }
+      }
+    })
+  }
+  return busyMap
+}
+
+const fallback = computeDashboardFromData(
+  INITIAL_DATA.projects,
+  INITIAL_DATA.employees
+)
 
 const EMPTY_PROJECT = {
   jobCard: '',
@@ -305,7 +104,7 @@ const EMPTY_PROJECT = {
   project: '',
   desc: '',
   unit: '',
-  qty: 0,
+  qty: '',
   location: '',
   mobDate: '',
   expStart: '',
@@ -317,33 +116,27 @@ const EMPTY_PROJECT = {
   remarks: '',
 }
 
-function fmtDate(d) {
-  if (!d || d === '-') return '—'
-  try {
-    return new Date(d).toLocaleDateString('en-GB', {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric',
-    })
-  } catch {
-    return d
-  }
-}
-
 // DEFINED COLUMNS WITH EXPLICIT ALIGNMENTS FOR PERFECT VERTICAL & HORIZONTAL LAYOUT
 const COLS = [
-  { key: 'id', label: 'S/NO', align: 'center' },
+  { key: 'id', label: '#', align: 'center' },
   { key: 'jobCard', label: 'Job Card No', align: 'left' },
+  { key: 'contract', label: 'Contract No', align: 'left' },
+  { key: 'serviceOrder', label: 'Service Order', align: 'left' },
   { key: 'project', label: 'Project Code', align: 'left' },
+  { key: 'category', label: 'Category', align: 'left' },
   { key: 'location', label: 'Location', align: 'center' },
   { key: 'desc', label: 'Description', align: 'left' },
-  { key: 'category', label: 'Category', align: 'left' },
-  { key: 'productQty', label: 'Product Qty', align: 'center' },
+  { key: 'unit', label: 'Unit', align: 'center' },
+  { key: 'productQty', label: 'Qty', align: 'center' },
   { key: 'mobDate', label: 'Mob Date (-5d)', align: 'center' },
-  { key: 'startDate', label: 'Start Date', align: 'center' },
-  { key: 'endDate', label: 'End Date', align: 'center' },
-  { key: 'status', label: 'Status', align: 'center' },
+  { key: 'expStart', label: 'Exp Start', align: 'center' },
+  { key: 'expEnd', label: 'Exp End', align: 'center' },
+  { key: 'actStart', label: 'Act Start', align: 'center' },
+  { key: 'actEnd', label: 'Act End', align: 'center' },
+  { key: 'assignedTo', label: 'Assigned To', align: 'left' },
   { key: 'assignedTeams', label: 'Assigned Teams', align: 'left' },
+  { key: 'remarks', label: 'Remarks', align: 'left' },
+  { key: 'status', label: 'Status', align: 'center' },
   { key: 'assignedHeadcount', label: 'Headcount Slots', align: 'center' },
   { key: 'assignedEmps', label: 'Assigned Roster', align: 'center' },
 ]
@@ -356,6 +149,14 @@ export default function Dashboard({ onOpenBackup }) {
   const [filterCat, setFilterCat] = useState('')
   const [sort, setSort] = useState({ col: 'id', dir: 'asc' })
   const [assigned, setAssigned] = useState(null)
+  const [selectedTeam, setSelectedTeam] = useState(null)
+  const [kpiModalType, setKpiModalType] = useState(null)
+  const [showForm, setShowForm] = useState(false)
+  const [showCategoryModal, setShowCategoryModal] = useState(false)
+  const [form, setForm] = useState(EMPTY_PROJECT)
+  const [editId, setEditId] = useState(null)
+  const [selectedTeams, setSelectedTeams] = useState([])
+  const [saving, setSaving] = useState(false)
 
   const load = useCallback(() => {
     getDashboard()
@@ -369,9 +170,15 @@ export default function Dashboard({ onOpenBackup }) {
 
   useEffect(() => {
     load()
-    const handleStorageUpdate = () => load()
-    window.addEventListener('pt_storage_updated', handleStorageUpdate)
-    return () => window.removeEventListener('pt_storage_updated', handleStorageUpdate)
+    const unsubscribe = subscribeToSupabase(() => load())
+    const handleDataUpdate = () => load()
+    window.addEventListener('pt_data_updated', handleDataUpdate)
+    window.addEventListener('pt_categories_updated', handleDataUpdate)
+    return () => {
+      unsubscribe()
+      window.removeEventListener('pt_data_updated', handleDataUpdate)
+      window.removeEventListener('pt_categories_updated', handleDataUpdate)
+    }
   }, [load])
 
   // ROBUST COLUMN SORTING
@@ -380,21 +187,27 @@ export default function Dashboard({ onOpenBackup }) {
     let va = a[sort.col]
     let vb = b[sort.col]
 
-    if (sort.col === 'productQty') {
+    if (sort.col === 'productQty' || sort.col === 'qty') {
       va = a.productQty ?? a.qty ?? 0
       vb = b.productQty ?? b.qty ?? 0
     } else if (sort.col === 'mobDate') {
       va = a.mobDateComputed || a.mobDate || ''
       vb = b.mobDateComputed || b.mobDate || ''
-    } else if (sort.col === 'startDate') {
-      va = a.startDate || a.actStart || a.expStart || ''
-      vb = b.startDate || b.actStart || b.expStart || ''
-    } else if (sort.col === 'endDate') {
-      va = a.endDate || a.actEnd || a.expEnd || ''
-      vb = b.endDate || b.actEnd || b.expEnd || ''
-    } else if (sort.col === 'assignedTeams') {
-      va = (a.assignedTeams || []).join(', ')
-      vb = (b.assignedTeams || []).join(', ')
+    } else if (sort.col === 'expStart') {
+      va = a.expStart || ''
+      vb = b.expStart || ''
+    } else if (sort.col === 'expEnd') {
+      va = a.expEnd || ''
+      vb = b.expEnd || ''
+    } else if (sort.col === 'actStart') {
+      va = a.actStart || ''
+      vb = b.actStart || ''
+    } else if (sort.col === 'actEnd') {
+      va = a.actEnd || ''
+      vb = b.actEnd || ''
+    } else if (sort.col === 'assignedTeams' || sort.col === 'team') {
+      va = (a.assignedTeams || []).join(', ') || a.team || ''
+      vb = (b.assignedTeams || []).join(', ') || b.team || ''
     } else if (sort.col === 'assignedHeadcount') {
       va = a.assignedHeadcount ?? 0
       vb = b.assignedHeadcount ?? 0
@@ -432,74 +245,278 @@ export default function Dashboard({ onOpenBackup }) {
   const sortArrow = col =>
     sort.col === col ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : ' ⇅'
 
+  // OPEN EDIT MODAL WITH DYNAMIC TEAM AVAILABILITY & BUSY DETECTION
+  const openEdit = p => {
+    const cat = p.category || getCategory(p.project)
+    const allTeams = getAllTeamsForCategory(cat, board)
+    const busyMap = getBusyTeamsForCategory(cat, p.id, board)
+    const available = allTeams.filter(t => !busyMap[t]).sort()
+
+    const explicit = (p.team || '')
+      .split(',')
+      .map(t => t.replace(/team/i, '').trim())
+      .filter(Boolean)
+
+    let initialTeams = []
+    if (explicit.length > 0) {
+      initialTeams = explicit.filter(t => !busyMap[t])
+      if (initialTeams.length === 0) initialTeams = explicit
+    } else if (p.status === 'Active' && p.assignedTeams && p.assignedTeams.length > 0) {
+      initialTeams = p.assignedTeams.filter(t => !busyMap[t])
+    } else if (available.length > 0) {
+      const isFirst = Object.keys(busyMap).length === 0
+      initialTeams = isFirst ? available : [available[0]]
+    }
+
+    const s = p.actStart || p.expStart || ''
+    const currentMob = p.mobDate || calc5DaysPrior(s)
+
+    setForm({
+      jobCard: p.jobCard || '',
+      contract: p.contract || '',
+      serviceOrder: p.serviceOrder || '',
+      project: p.project || '',
+      desc: p.desc || '',
+      unit: p.unit ?? '',
+      qty: p.qty ?? 0,
+      location: p.location || '',
+      mobDate: currentMob,
+      expStart: p.expStart || '',
+      expEnd: p.expEnd || '',
+      actStart: p.actStart || '',
+      actEnd: p.actEnd || '',
+      assignedTo: p.assignedTo || '',
+      team: initialTeams.join(', '),
+      remarks: p.remarks || '',
+    })
+    setSelectedTeams(initialTeams)
+    setEditId(p.id)
+    setShowForm(true)
+  }
+
+  const handleStartDateChange = (field, val) => {
+    const newMob = calc5DaysPrior(val)
+    setForm(f => {
+      const updated = {
+        ...f,
+        [field]: val,
+        mobDate: newMob || f.mobDate,
+      }
+
+      const cat = getCategory(updated.project)
+      const allTeams = getAllTeamsForCategory(cat, board)
+      const busyMap = getBusyTeamsForCategory(cat, editId, board)
+      const available = allTeams.filter(t => !busyMap[t]).sort()
+
+      if (val && available.length > 0) {
+        const isFirst = Object.keys(busyMap).length === 0
+        if (isFirst) {
+          setSelectedTeams(available)
+          updated.team = available.join(', ')
+        } else if (selectedTeams.length === 0) {
+          const defaultChoice = [available[0]]
+          setSelectedTeams(defaultChoice)
+          updated.team = defaultChoice.join(', ')
+        }
+      }
+      return updated
+    })
+  }
+
+  const handleProjectChange = val => {
+    setForm(f => {
+      const updated = { ...f, project: val }
+      const cat = getCategory(val)
+      const allTeams = getAllTeamsForCategory(cat, board)
+      const busyMap = getBusyTeamsForCategory(cat, editId, board)
+      const available = allTeams.filter(t => !busyMap[t]).sort()
+
+      if (updated.expStart || updated.actStart) {
+        const isFirst = Object.keys(busyMap).length === 0
+        if (isFirst) {
+          setSelectedTeams(available)
+          updated.team = available.join(', ')
+        } else {
+          const stillValid = selectedTeams.filter(t => available.includes(t))
+          const newChoice = stillValid.length > 0 ? stillValid : (available.length > 0 ? [available[0]] : [])
+          setSelectedTeams(newChoice)
+          updated.team = newChoice.join(', ')
+        }
+      }
+      return updated
+    })
+  }
+
+  const toggleTeamSelection = teamName => {
+    setSelectedTeams(prev => {
+      const next = prev.includes(teamName)
+        ? prev.filter(t => t !== teamName)
+        : [...prev, teamName].sort()
+      setForm(f => ({ ...f, team: next.join(', ') }))
+      return next
+    })
+  }
+
+  const saveForm = async () => {
+    setSaving(true)
+    const payload = {
+      ...form,
+      team: selectedTeams.join(', '),
+    }
+    try {
+      if (editId) await updateProject(editId, payload)
+      setShowForm(false)
+      load()
+    } catch {
+      setShowForm(false)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const delProject = async id => {
+    if (!confirm('Delete this project?')) return
+    try {
+      await deleteProject(id)
+      load()
+    } catch {
+      setBoard(b => b.filter(p => p.id !== id))
+    }
+  }
+
+  const currentEditingProject = board.find(p => p.id === editId)
+  const isEditingActive = Boolean(
+    (form.actStart || form.expStart) && (form.actEnd || form.expEnd)
+  )
+
+  const currentCategory = getCategory(form.project || currentEditingProject?.project)
+  const allCategoryTeams = getAllTeamsForCategory(currentCategory, board)
+  const busyTeamsMap = getBusyTeamsForCategory(currentCategory, editId, board)
+  const availableTeamsForEditing = allCategoryTeams.filter(t => !busyTeamsMap[t])
+  const isFirstProjectInCategory = Object.keys(busyTeamsMap).length === 0
+
   const kpiCards = [
     {
+      type: 'active',
       label: 'Active Projects',
-      value: kpis.active,
+      value: kpis.active ?? 0,
       icon: '✅',
       cls: 'c-green',
-      sub: 'With start date',
+      sub: 'With start dates',
     },
     {
+      type: 'pending',
       label: 'Pending Projects',
-      value: kpis.pending,
+      value: kpis.pending ?? 0,
       icon: '⏳',
       cls: 'c-amber',
       sub: 'Awaiting scheduling',
     },
     {
+      type: 'completed',
+      label: 'Completed Projects',
+      value: kpis.completed ?? 0,
+      icon: '🏁',
+      cls: 'c-indigo',
+      sub: 'Actual end date passed',
+    },
+    {
+      type: 'deployed',
       label: 'Deployed Slots',
-      value: kpis.deployed,
+      value: kpis.deployed ?? 0,
       icon: '👤',
       cls: 'c-blue',
       sub: 'Committed to active jobs',
     },
     {
+      type: 'total',
       label: 'Total Workforce',
-      value: kpis.total,
+      value: kpis.total ?? 0,
       icon: '👷',
       cls: 'c-purple',
-      sub: 'Team slots (incl. Needs)',
+      sub: 'Team slots',
     },
     {
+      type: 'idle',
       label: 'Idle / Available',
-      value: kpis.idle,
+      value: kpis.idle ?? 0,
       icon: '💤',
       cls: 'c-teal',
       sub: 'In office / Standby',
     },
     {
+      type: 'shortfalls',
       label: 'Shortfall Alerts',
-      value: kpis.shortfalls,
+      value: kpis.shortfalls ?? 0,
       icon: '⚠️',
-      cls: kpis.shortfalls > 0 ? 'c-red' : 'c-green',
+      cls: (kpis.shortfalls || 0) > 0 ? 'c-red' : 'c-green',
       sub: 'Projects with 0 staff',
     },
   ]
 
   return (
     <div className="page">
-      {/* 6-Card KPI Grid (Perfect 6-Column Alignment) */}
+      {/* Top Right Action Bar */}
+      <div className="dashboard-top-bar">
+        <button
+          className="btn-export"
+          onClick={() => exportDashboard(board, kpis, pools)}
+          title="Export complete Dashboard summary, pools, and project table to Excel"
+        >
+          ⬇ Export to Excel
+        </button>
+      </div>
+
+      {/* 7-Card KPI Grid (Clickable Cards that open detail popups) */}
       <div className="kpi-grid">
         {kpiCards.map(k => (
-          <div key={k.label} className={`kpi-card ${k.cls}`}>
+          <div
+            key={k.label}
+            className={`kpi-card ${k.cls}`}
+            onClick={() => setKpiModalType(k.type)}
+            style={{ cursor: 'pointer' }}
+            title={`Click to view ${k.label} details popup`}
+          >
             <div className="kpi-icon">{k.icon}</div>
             <div className="kpi-label">{k.label}</div>
             <div className="kpi-value">{k.value}</div>
-            <div className="kpi-sub">{k.sub}</div>
+            <div className="kpi-sub">
+              {k.sub} <span style={{ opacity: 0.7, marginLeft: '3px' }}>↗</span>
+            </div>
           </div>
         ))}
       </div>
 
       {/* EXECUTIVE CATEGORY WORKFORCE COMMAND CENTER (FULL WIDTH STRIPS) */}
       <div className="section">
-        <div className="section-header">
+        <div className="section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
           <div>
             <h2>Category Workforce Pool &amp; Team Deployment Status</h2>
             <div className="subtitle">
-              Live deployment tracking across all 5 workforce categories ({kpis.total} Total Positions • {kpis.deployed} On-Site • {kpis.idle} Office Standby)
+              Live deployment tracking across all {pools.length} workforce categories ({kpis.total} Total Positions • {kpis.deployed} On-Site • {kpis.idle} Office Standby)
             </div>
           </div>
+          <button
+            type="button"
+            className="btn-action"
+            onClick={() => setShowCategoryModal(true)}
+            title="Manage categories, add new project codes, and assign teams"
+            style={{
+              fontSize: '12.5px',
+              padding: '0.45rem 0.95rem',
+              background: 'rgba(26, 111, 196, 0.08)',
+              color: 'var(--blue)',
+              borderColor: 'rgba(26, 111, 196, 0.3)',
+              fontWeight: 700,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.45rem',
+              borderRadius: '8px',
+            }}
+          >
+            <span>🏷️</span>
+            <span>Manage Categories &amp; Teams</span>
+          </button>
         </div>
 
         <div className="pool-command-center">
@@ -519,7 +536,27 @@ export default function Dashboard({ onOpenBackup }) {
             return (
               <div key={p.category} className="pool-strip-card">
                 {/* Left Column: Category Identity, Slots, Metrics & Bar */}
-                <div className="pool-strip-left">
+                <div
+                  className="pool-strip-left"
+                  onClick={() =>
+                    setSelectedTeam({
+                      category: p.category,
+                      team: '',
+                      status: '',
+                      activeJob: '',
+                      totalSlots: p.totalPool,
+                      actualStaff: (p.employees || []).filter(
+                        e => e.empId !== 'Need' && !(e.nameEn || '').toLowerCase().startsWith('need')
+                      ).length,
+                      needSlots: (p.employees || []).filter(
+                        e => e.empId === 'Need' || (e.nameEn || '').toLowerCase().startsWith('need')
+                      ).length,
+                      employees: p.employees || [],
+                    })
+                  }
+                  style={{ cursor: 'pointer' }}
+                  title={`Click to view all ${p.category} employees (${p.totalPool} Slots)`}
+                >
                   <div className="pool-strip-cat-header">
                     <div className="pool-strip-cat-name" style={{ color: col }}>
                       <span
@@ -578,6 +615,20 @@ export default function Dashboard({ onOpenBackup }) {
                         className={`pool-fleet-tile ${
                           isDep ? 'deployed' : 'standby'
                         }`}
+                        onClick={() =>
+                          setSelectedTeam({
+                            category: p.category,
+                            team: tc.name,
+                            status: tc.status,
+                            activeJob: tc.activeJob,
+                            totalSlots: tc.totalSlots,
+                            actualStaff: tc.actualStaff,
+                            needSlots: tc.needSlots,
+                            employees: tc.employees || [],
+                          })
+                        }
+                        style={{ cursor: 'pointer' }}
+                        title={`Click to view Team ${tc.name} employee roster (${p.category})`}
                       >
                         <div className="fleet-tile-top">
                           <span className="fleet-tile-name">
@@ -589,7 +640,7 @@ export default function Dashboard({ onOpenBackup }) {
                         </div>
 
                         <div className="fleet-tile-composition">
-                          {tc.actualStaff} Staff • {tc.needSlots} Needs
+                          {tc.actualStaff} Staff
                         </div>
 
                         <div
@@ -636,6 +687,7 @@ export default function Dashboard({ onOpenBackup }) {
               <option value="">All Status</option>
               <option value="Active">Active</option>
               <option value="Pending">Pending</option>
+              <option value="Completed">Completed</option>
             </select>
             <select
               value={filterCat}
@@ -648,19 +700,6 @@ export default function Dashboard({ onOpenBackup }) {
                 </option>
               ))}
             </select>
-            <button className="btn-export" onClick={() => exportDashboard(board, kpis)}>
-              ⬇ Export to Excel
-            </button>
-            {onOpenBackup && (
-              <button
-                className="btn-export"
-                style={{ background: '#0f172a', borderColor: '#334155' }}
-                onClick={onOpenBackup}
-                title="Backup & Restore Data (JSON)"
-              >
-                💾 Backup &amp; Sync
-              </button>
-            )}
           </div>
         </div>
 
@@ -695,12 +734,26 @@ export default function Dashboard({ onOpenBackup }) {
                   <tr key={p.id}>
                     <td className="td-center">{p.id}</td>
                     <td className="td-left">
-                      <code className="job-code">{p.jobCard}</code>
+                      <code className="job-code">
+                        {p.jobCard}
+                      </code>
                     </td>
+                    <td className="td-left">{p.contract || '—'}</td>
+                    <td className="td-left">{p.serviceOrder || '—'}</td>
                     <td className="td-left">
                       <strong style={{ color: '#1a6fc4' }}>
                         {p.project || '—'}
                       </strong>
+                    </td>
+                    <td className="td-left">
+                      <span
+                        style={{
+                          fontWeight: 600,
+                          color: categoryColors[p.category] || '#1a1f2e',
+                        }}
+                      >
+                        {p.category}
+                      </span>
                     </td>
                     <td className="td-center">
                       <span
@@ -717,16 +770,7 @@ export default function Dashboard({ onOpenBackup }) {
                       </span>
                     </td>
                     <td className="td-left desc-cell">{p.desc || '—'}</td>
-                    <td className="td-left">
-                      <span
-                        style={{
-                          fontWeight: 600,
-                          color: categoryColors[p.category] || '#1a1f2e',
-                        }}
-                      >
-                        {p.category}
-                      </span>
-                    </td>
+                    <td className="td-center">{p.unit || '—'}</td>
                     <td className="td-center bold">
                       <span
                         title="Deliverables / Product Quantity"
@@ -751,20 +795,14 @@ export default function Dashboard({ onOpenBackup }) {
                         {fmtDate(p.mobDateComputed || p.mobDate)}
                       </span>
                     </td>
-                    <td className="td-center">{fmtDate(p.startDate)}</td>
-                    <td className="td-center">{fmtDate(p.endDate)}</td>
-                    <td className="td-center">
-                      <span
-                        className={`badge badge-${p.status?.toLowerCase()}`}
-                      >
-                        {p.status}
-                      </span>
-                    </td>
+                    <td className="td-center">{fmtDate(p.expStart)}</td>
+                    <td className="td-center">{fmtDate(p.expEnd)}</td>
+                    <td className="td-center">{fmtDate(p.actStart)}</td>
+                    <td className="td-center">{fmtDate(p.actEnd)}</td>
+                    <td className="td-left">{p.assignedTo || '—'}</td>
                     {/* Assigned Teams Pills (Alphabetical) */}
                     <td className="td-left">
-                      {p.status === 'Active' &&
-                      p.assignedTeams &&
-                      p.assignedTeams.length > 0 ? (
+                      {p.assignedTeams && p.assignedTeams.length > 0 ? (
                         <div
                           style={{
                             display: 'flex',
@@ -789,9 +827,31 @@ export default function Dashboard({ onOpenBackup }) {
                             </span>
                           ))}
                         </div>
+                      ) : p.team ? (
+                        <span
+                          style={{
+                            padding: '2px 7px',
+                            borderRadius: '12px',
+                            background: '#eff6ff',
+                            color: '#1a6fc4',
+                            fontSize: '11px',
+                            fontWeight: 700,
+                            border: '1px solid #bfdbfe',
+                          }}
+                        >
+                          Team {p.team.replace(/team/i, '').trim()}
+                        </span>
                       ) : (
                         <span className="muted">—</span>
                       )}
+                    </td>
+                    <td className="td-left">{p.remarks || '—'}</td>
+                    <td className="td-center">
+                      <span
+                        className={`badge badge-${p.status?.toLowerCase()}`}
+                      >
+                        {p.status}
+                      </span>
                     </td>
                     {/* Assigned Headcount Slots */}
                     <td className="td-center">
@@ -799,28 +859,24 @@ export default function Dashboard({ onOpenBackup }) {
                         style={{
                           fontWeight: 700,
                           color:
-                            p.status === 'Active'
-                              ? p.assignedHeadcount > 0
-                                ? '#1a6fc4'
-                                : '#e53e3e'
-                              : '#8a96aa',
+                            p.assignedHeadcount > 0 ? '#1a6fc4' : '#8a96aa',
                         }}
                       >
-                        {p.status === 'Active'
+                        {p.assignedHeadcount > 0
                           ? `${p.assignedHeadcount} slots`
                           : '—'}
                       </span>
                     </td>
                     {/* View Assigned Employees Button */}
                     <td className="td-center">
-                      {p.status === 'Active' && p.assignedHeadcount > 0 ? (
+                      {p.assignedHeadcount > 0 ? (
                         <button
                           className="btn-assigned"
                           onClick={() =>
                             setAssigned({
                               id: p.id,
                               name: `${p.jobCard} · ${p.project} (${p.category}) - Teams: ${[
-                                ...p.assignedTeams,
+                                ...(p.assignedTeams || []),
                               ]
                                 .sort()
                                 .join(', ')}`,
@@ -842,12 +898,515 @@ export default function Dashboard({ onOpenBackup }) {
         </div>
       </div>
 
+      {/* Edit Project & Team Allocation Modal */}
+      {showForm && currentEditingProject && (
+        <div className="modal-overlay open">
+          <div className="glass-modal">
+            <div className="modal-header">
+              <div>
+                <h3 style={{ margin: 0 }}>
+                  Edit Project: {form.jobCard || currentEditingProject.jobCard}
+                </h3>
+                <span
+                  style={{
+                    fontSize: '12px',
+                    color: categoryColors[currentEditingProject.category],
+                    fontWeight: 600,
+                  }}
+                >
+                  Category: {currentEditingProject.category}
+                </span>
+              </div>
+              <button
+                className="modal-close"
+                onClick={() => setShowForm(false)}
+              >
+                ✕
+              </button>
+            </div>
+            <div className="modal-body">
+              <div
+                className={`date-info-banner ${
+                  isEditingActive ? 'banner-active' : 'banner-pending'
+                }`}
+              >
+                {isEditingActive
+                  ? '✅ Active Project — Start & End dates populated. 1 team auto-assigned in alphabetical order.'
+                  : '📅 Pending Project — Input Start & End dates below to auto-populate Mobilization Date (-5d) and claim next available team.'}
+              </div>
+
+              {/* Dynamic Team Allocation Banner & Checkbox Grid */}
+              <div
+                style={{
+                  marginTop: '1rem',
+                  marginBottom: '1.2rem',
+                  padding: '0.9rem 1.1rem',
+                  background: 'rgba(255, 255, 255, 0.85)',
+                  border: '1px solid rgba(26, 111, 196, 0.25)',
+                  borderRadius: '12px',
+                }}
+              >
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    marginBottom: '6px',
+                    flexWrap: 'wrap',
+                    gap: '6px',
+                  }}
+                >
+                  <strong
+                    style={{
+                      fontSize: '13.5px',
+                      color: '#1a365d',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                    }}
+                  >
+                    👥 Team Allocation ({currentCategory})
+                  </strong>
+                  {isFirstProjectInCategory ? (
+                    <span
+                      style={{
+                        fontSize: '11px',
+                        background: '#dcfce7',
+                        color: '#15803d',
+                        padding: '2px 9px',
+                        borderRadius: '12px',
+                        fontWeight: 700,
+                        border: '1px solid #bbf7d0',
+                      }}
+                    >
+                      🌟 1st Project (All teams auto-assigned on Start Date)
+                    </span>
+                  ) : (
+                    <span
+                      style={{
+                        fontSize: '11px',
+                        background: '#eff6ff',
+                        color: '#1d4ed8',
+                        padding: '2px 9px',
+                        borderRadius: '12px',
+                        fontWeight: 700,
+                        border: '1px solid #bfdbfe',
+                      }}
+                    >
+                      📌 Manual Team Selection (Busy teams locked 🔒)
+                    </span>
+                  )}
+                </div>
+
+                <span
+                  style={{
+                    fontSize: '11.5px',
+                    color: '#64748b',
+                    display: 'block',
+                    marginBottom: '10px',
+                  }}
+                >
+                  {isFirstProjectInCategory
+                    ? 'Entering Expected Start Date will automatically assign all available teams to this initial project.'
+                    : 'Select team(s) to assign to this project by checking the box. Already busy teams are locked.'}
+                </span>
+
+                <div
+                  style={{
+                    display: 'flex',
+                    gap: '10px',
+                    flexWrap: 'wrap',
+                    marginTop: '6px',
+                  }}
+                >
+                  {/* Render Available Teams as Checkbox Cards */}
+                  {availableTeamsForEditing.map(t => {
+                    const isSelected = selectedTeams.includes(t)
+
+                    return (
+                      <label
+                        key={t}
+                        onClick={() => toggleTeamSelection(t)}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '8px',
+                          padding: '7px 14px',
+                          borderRadius: '10px',
+                          cursor: 'pointer',
+                          userSelect: 'none',
+                          transition: 'all 0.18s ease',
+                          border: isSelected
+                            ? '2px solid #1a6fc4'
+                            : '1.5px solid #cbd5e1',
+                          background: isSelected
+                            ? '#eff6ff'
+                            : '#ffffff',
+                          color: isSelected
+                            ? '#1e40af'
+                            : '#1e293b',
+                          fontWeight: isSelected ? 700 : 500,
+                          fontSize: '12.5px',
+                          boxShadow: isSelected
+                            ? '0 2px 8px rgba(26, 111, 196, 0.15)'
+                            : '0 1px 3px rgba(0, 0, 0, 0.04)',
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => {}}
+                          style={{
+                            cursor: 'pointer',
+                            width: '15px',
+                            height: '15px',
+                            accentColor: '#1a6fc4',
+                          }}
+                        />
+                        <span>Team {t}</span>
+                      </label>
+                    )
+                  })}
+
+                  {/* Render Occupied / Locked Teams */}
+                  {Object.entries(busyTeamsMap).map(([t, jobCard]) => (
+                    <div
+                      key={t}
+                      title={`Team ${t} is busy and locked on active project ${jobCard}`}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        padding: '7px 14px',
+                        borderRadius: '10px',
+                        cursor: 'not-allowed',
+                        userSelect: 'none',
+                        border: '1.5px dashed #cbd5e1',
+                        background: '#f8fafc',
+                        color: '#94a3b8',
+                        fontSize: '12.5px',
+                        opacity: 0.85,
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={false}
+                        disabled
+                        style={{
+                          cursor: 'not-allowed',
+                          width: '15px',
+                          height: '15px',
+                        }}
+                      />
+                      <span>🔒 Team {t}</span>
+                      <span
+                        style={{
+                          fontSize: '10px',
+                          background: '#fee2e2',
+                          color: '#991b1b',
+                          padding: '1px 6px',
+                          borderRadius: '8px',
+                          fontWeight: 600,
+                        }}
+                      >
+                        Busy ({jobCard})
+                      </span>
+                    </div>
+                  ))}
+                </div>
+
+                {selectedTeams.length > 0 && (
+                  <div
+                    style={{
+                      marginTop: '0.8rem',
+                      fontSize: '12px',
+                      color: '#15803d',
+                      fontWeight: 600,
+                      background: '#f0fdf4',
+                      padding: '6px 10px',
+                      borderRadius: '6px',
+                      border: '1px solid #bbf7d0',
+                    }}
+                  >
+                    ✓ Assigned to this project:{' '}
+                    {[...selectedTeams].sort().map(t => `Team ${t}`).join(', ')}
+                  </div>
+                )}
+              </div>
+
+              {/* Form Grid */}
+              <div className="form-grid" style={{ marginTop: '1.2rem' }}>
+                <div className="form-group">
+                  <label>Job Card No</label>
+                  <input
+                    value={form.jobCard || ''}
+                    onChange={e => setForm(f => ({ ...f, jobCard: e.target.value }))}
+                    placeholder="e.g. JC-2026-001"
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label>Contract No</label>
+                  <input
+                    value={form.contract || ''}
+                    onChange={e => setForm(f => ({ ...f, contract: e.target.value }))}
+                    placeholder="e.g. 4400020478"
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label>Service Order No</label>
+                  <input
+                    value={form.serviceOrder || ''}
+                    onChange={e => setForm(f => ({ ...f, serviceOrder: e.target.value }))}
+                    placeholder="e.g. 8501520961"
+                  />
+                </div>
+
+                {/* Project Code & Category Dropdown with Auto Team Identification */}
+                <div className="form-group">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '3px' }}>
+                    <label style={{ margin: 0 }}>Project Code / Category *</label>
+                    <button
+                      type="button"
+                      onClick={() => setShowCategoryModal(true)}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: 'var(--blue)',
+                        fontSize: '11px',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        padding: 0,
+                      }}
+                    >
+                      + Add New Category
+                    </button>
+                  </div>
+                  <select
+                    value={form.project || ''}
+                    onChange={e => handleProjectChange(e.target.value)}
+                    required
+                    style={{
+                      padding: '0.52rem 0.8rem',
+                      borderRadius: '8px',
+                      border: '1px solid rgba(200, 210, 230, 0.8)',
+                      fontSize: '13px',
+                      background: '#ffffff',
+                      color: 'var(--text)',
+                      fontWeight: 600,
+                    }}
+                  >
+                    <option value="" disabled>-- Select Project Code / Category --</option>
+                    {getCategories().map(c => {
+                      const val = c.code || c.name || c.category
+                      return (
+                        <option key={val} value={val}>
+                          {c.name || val} ({c.code}) — {c.teams?.length || 0} Teams
+                        </option>
+                      )
+                    })}
+                  </select>
+                </div>
+
+                <div className="form-group">
+                  <label>Location (e.g. SPP, SSPP, JSPP, DPP)</label>
+                  <input
+                    value={form.location || ''}
+                    onChange={e => setForm(f => ({ ...f, location: e.target.value }))}
+                    placeholder="e.g. SPP"
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label>Unit #</label>
+                  <input
+                    value={form.unit || ''}
+                    onChange={e => setForm(f => ({ ...f, unit: e.target.value }))}
+                    placeholder="e.g. 1"
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label>Product Deliverable Quantity</label>
+                  <input
+                    type="number"
+                    value={form.qty || 0}
+                    onChange={e =>
+                      setForm(f => ({ ...f, qty: +e.target.value }))
+                    }
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label>Assigned To</label>
+                  <input
+                    value={form.assignedTo || ''}
+                    onChange={e =>
+                      setForm(f => ({ ...f, assignedTo: e.target.value }))
+                    }
+                  />
+                </div>
+
+                {/* DATES WITH AUTO MOBILIZATION POPULATION */}
+                <div className="form-group">
+                  <label>
+                    Mobilization Date{' '}
+                    <span
+                      style={{
+                        color: '#1a6fc4',
+                        fontWeight: 700,
+                        fontSize: '10.5px',
+                      }}
+                    >
+                      (Auto -5 days before start)
+                    </span>
+                  </label>
+                  <input
+                    type="date"
+                    value={form.mobDate || ''}
+                    onChange={e =>
+                      setForm(f => ({ ...f, mobDate: e.target.value }))
+                    }
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label>Expected Start Date</label>
+                  <input
+                    type="date"
+                    value={form.expStart || ''}
+                    onChange={e =>
+                      handleStartDateChange('expStart', e.target.value)
+                    }
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label>Expected End Date</label>
+                  <input
+                    type="date"
+                    value={form.expEnd || ''}
+                    onChange={e =>
+                      setForm(f => ({ ...f, expEnd: e.target.value }))
+                    }
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label>
+                    Actual Start Date{' '}
+                    <span
+                      style={{
+                        color: '#28a745',
+                        fontWeight: 700,
+                        fontSize: '10.5px',
+                      }}
+                    >
+                      (Auto updates Mob Date)
+                    </span>
+                  </label>
+                  <input
+                    type="date"
+                    value={form.actStart || ''}
+                    onChange={e =>
+                      handleStartDateChange('actStart', e.target.value)
+                    }
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label>Actual End Date</label>
+                  <input
+                    type="date"
+                    value={form.actEnd || ''}
+                    onChange={e =>
+                      setForm(f => ({ ...f, actEnd: e.target.value }))
+                    }
+                  />
+                </div>
+
+                <div className="form-group full">
+                  <label>Description</label>
+                  <textarea
+                    rows={2}
+                    value={form.desc || ''}
+                    onChange={e =>
+                      setForm(f => ({ ...f, desc: e.target.value }))
+                    }
+                  />
+                </div>
+
+                <div className="form-group full">
+                  <label>Remarks</label>
+                  <input
+                    value={form.remarks || ''}
+                    onChange={e =>
+                      setForm(f => ({ ...f, remarks: e.target.value }))
+                    }
+                  />
+                </div>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button
+                className="btn-ghost"
+                onClick={() => setShowForm(false)}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn-primary"
+                onClick={saveForm}
+                disabled={saving}
+              >
+                {saving ? 'Saving…' : 'Save Changes'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Assigned Employees Popup Modal */}
       {assigned && (
         <AssignedModal
           projectId={assigned.id}
           projectName={assigned.name}
           onClose={() => setAssigned(null)}
+        />
+      )}
+
+      {/* Specific Team Employee Details Modal */}
+      {selectedTeam && (
+        <TeamModal
+          teamData={selectedTeam}
+          onClose={() => setSelectedTeam(null)}
+        />
+      )}
+
+      {/* KPI Detail Cards Popup Modal */}
+      {kpiModalType && (
+        <KpiDetailModal
+          type={kpiModalType}
+          kpis={kpis}
+          projects={board}
+          pools={pools}
+          onClose={() => setKpiModalType(null)}
+          onOpenRoster={assignedInfo => {
+            setKpiModalType(null)
+            setAssigned(assignedInfo)
+          }}
+        />
+      )}
+
+      {/* Project Code & Category Manager Modal */}
+      {showCategoryModal && (
+        <CategoryModal
+          onClose={() => setShowCategoryModal(false)}
+          onCategoryCreated={newCat => {
+            handleProjectChange(newCat.code || newCat.name)
+            setShowCategoryModal(false)
+          }}
         />
       )}
     </div>

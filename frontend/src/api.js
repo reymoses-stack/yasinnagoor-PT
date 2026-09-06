@@ -1,6 +1,5 @@
-// Supabase Cloud API Client for Pioneer Technical Resource Management System
+// Pioneer Technical Resource Management System API Client
 import XLSX from 'xlsx-js-style'
-import { supabase, isSupabaseConfigured } from './supabase.js'
 import { INITIAL_DATA } from './seedData.js'
 
 export const DEFAULT_CATEGORIES = [
@@ -719,22 +718,14 @@ export function computeDashboardFromData(prjs = [], emps = []) {
 }
 
 // ----------------------------------------------------
-// PROJECTS API (Supabase Cloud)
+// PROJECTS API (Local & Realtime State)
 // ----------------------------------------------------
 export const getProjectsRaw = async (params = {}) => {
-  if (isSupabaseConfigured && supabase) {
-    try {
-      let query = supabase.from('projects').select('*').order('id', { ascending: true })
-      if (params.project) query = query.eq('project', params.project)
-      const { data, error } = await query
-      if (error) throw error
-      const mapped = (data || []).map(mapProjectRow)
-      return { data: mapped }
-    } catch (e) {
-      console.error('Supabase getProjectsRaw error:', e)
-    }
+  let list = fallbackProjects
+  if (params.project) {
+    list = list.filter(p => p.project === params.project)
   }
-  return { data: fallbackProjects }
+  return { data: list }
 }
 
 export const getProjects = async (params = {}) => {
@@ -750,44 +741,25 @@ export const getProjects = async (params = {}) => {
 }
 
 export const createProject = async body => {
-  if (isSupabaseConfigured && supabase) {
-    try {
-      const dbPayload = mapProjectToDb(body)
-      const { data, error } = await supabase.from('projects').insert([dbPayload]).select().single()
-      if (error) throw error
-      return mapProjectRow(data)
-    } catch (e) {
-      console.error('Supabase createProject error:', e)
-    }
-  }
   const newId = fallbackProjects.length > 0 ? Math.max(...fallbackProjects.map(p => p.id || 0)) + 1 : 1
   const newPrj = { ...body, id: newId }
   fallbackProjects.push(newPrj)
   saveStoredProjects(fallbackProjects)
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('pt_data_updated', { detail: { type: 'project_created' } }))
+  }
   return newPrj
 }
 
 export const updateProject = async (id, body) => {
   const numId = Number(id)
-  if (isSupabaseConfigured && supabase) {
-    try {
-      const dbPayload = mapProjectToDb(body)
-      const { data, error } = await supabase
-        .from('projects')
-        .update(dbPayload)
-        .eq('id', numId)
-        .select()
-        .single()
-      if (error) throw error
-      return mapProjectRow(data)
-    } catch (e) {
-      console.error('Supabase updateProject error:', e)
-    }
-  }
   const idx = fallbackProjects.findIndex(p => p.id === numId)
   if (idx !== -1) {
     fallbackProjects[idx] = { ...fallbackProjects[idx], ...body, id: numId }
     saveStoredProjects(fallbackProjects)
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('pt_data_updated', { detail: { type: 'project_updated' } }))
+    }
     return fallbackProjects[idx]
   }
   return body
@@ -795,17 +767,11 @@ export const updateProject = async (id, body) => {
 
 export const deleteProject = async id => {
   const numId = Number(id)
-  if (isSupabaseConfigured && supabase) {
-    try {
-      const { error } = await supabase.from('projects').delete().eq('id', numId)
-      if (error) throw error
-      return { success: true }
-    } catch (e) {
-      console.error('Supabase deleteProject error:', e)
-    }
-  }
   fallbackProjects = fallbackProjects.filter(p => p.id !== numId)
   saveStoredProjects(fallbackProjects)
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('pt_data_updated', { detail: { type: 'project_deleted' } }))
+  }
   return { success: true }
 }
 
@@ -825,32 +791,9 @@ export const getAssigned = async id => {
 }
 
 // ----------------------------------------------------
-// EMPLOYEES API (Supabase Cloud)
+// EMPLOYEES API (Local & Realtime State)
 // ----------------------------------------------------
 export const getEmployees = async (params = {}) => {
-  if (isSupabaseConfigured && supabase) {
-    try {
-      let query = supabase.from('employees').select('*').order('id', { ascending: true })
-      if (params.project) query = query.eq('project', params.project)
-      const { data, error } = await query
-      if (error) throw error
-
-      let list = (data || []).map(mapEmployeeRow)
-      if (params.search) {
-        const q = params.search.toLowerCase()
-        list = list.filter(
-          e =>
-            (e.nameEn || '').toLowerCase().includes(q) ||
-            (e.empId || '').toLowerCase().includes(q) ||
-            (e.project || '').toLowerCase().includes(q)
-        )
-      }
-      return { data: list }
-    } catch (e) {
-      console.error('Supabase getEmployees error:', e)
-    }
-  }
-
   let list = fallbackEmployees
   if (params.search) {
     const q = params.search.toLowerCase()
@@ -868,44 +811,25 @@ export const getEmployees = async (params = {}) => {
 }
 
 export const createEmployee = async body => {
-  if (isSupabaseConfigured && supabase) {
-    try {
-      const dbPayload = mapEmployeeToDb(body)
-      const { data, error } = await supabase.from('employees').insert([dbPayload]).select().single()
-      if (error) throw error
-      return mapEmployeeRow(data)
-    } catch (e) {
-      console.error('Supabase createEmployee error:', e)
-    }
-  }
   const newId = fallbackEmployees.length > 0 ? Math.max(...fallbackEmployees.map(e => e.id || 0)) + 1 : 1
   const newEmp = { ...body, id: newId }
   fallbackEmployees.push(newEmp)
   saveStoredEmployees(fallbackEmployees)
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('pt_data_updated', { detail: { type: 'employee_created' } }))
+  }
   return newEmp
 }
 
 export const updateEmployee = async (id, body) => {
   const numId = Number(id)
-  if (isSupabaseConfigured && supabase) {
-    try {
-      const dbPayload = mapEmployeeToDb(body)
-      const { data, error } = await supabase
-        .from('employees')
-        .update(dbPayload)
-        .eq('id', numId)
-        .select()
-        .single()
-      if (error) throw error
-      return mapEmployeeRow(data)
-    } catch (e) {
-      console.error('Supabase updateEmployee error:', e)
-    }
-  }
   const idx = fallbackEmployees.findIndex(e => e.id === numId)
   if (idx !== -1) {
     fallbackEmployees[idx] = { ...fallbackEmployees[idx], ...body, id: numId }
     saveStoredEmployees(fallbackEmployees)
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('pt_data_updated', { detail: { type: 'employee_updated' } }))
+    }
     return fallbackEmployees[idx]
   }
   return body
@@ -913,22 +837,16 @@ export const updateEmployee = async (id, body) => {
 
 export const deleteEmployee = async id => {
   const numId = Number(id)
-  if (isSupabaseConfigured && supabase) {
-    try {
-      const { error } = await supabase.from('employees').delete().eq('id', numId)
-      if (error) throw error
-      return { success: true }
-    } catch (e) {
-      console.error('Supabase deleteEmployee error:', e)
-    }
-  }
   fallbackEmployees = fallbackEmployees.filter(e => e.id !== numId)
   saveStoredEmployees(fallbackEmployees)
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('pt_data_updated', { detail: { type: 'employee_deleted' } }))
+  }
   return { success: true }
 }
 
 // ----------------------------------------------------
-// DASHBOARD API (Supabase Cloud Realtime Computation)
+// DASHBOARD API (Realtime Computation)
 // ----------------------------------------------------
 export const getDashboard = async () => {
   const [prjsRes, empsRes] = await Promise.all([getProjects(), getEmployees()])
@@ -937,26 +855,15 @@ export const getDashboard = async () => {
   return computeDashboardFromData(prjs, emps)
 }
 
-// Realtime Cloud Listener
+// Realtime Subscriber
 export function subscribeToSupabase(callback) {
-  if (!isSupabaseConfigured || !supabase) return () => { }
-
-  const channel = supabase
-    .channel('schema-db-changes')
-    .on(
-      'postgres_changes',
-      { event: '*', schema: 'public', table: 'projects' },
-      () => callback && callback('projects')
-    )
-    .on(
-      'postgres_changes',
-      { event: '*', schema: 'public', table: 'employees' },
-      () => callback && callback('employees')
-    )
-    .subscribe()
-
+  if (typeof window === 'undefined') return () => {}
+  const handler = () => {
+    callback && callback()
+  }
+  window.addEventListener('pt_data_updated', handler)
   return () => {
-    supabase.removeChannel(channel)
+    window.removeEventListener('pt_data_updated', handler)
   }
 }
 
@@ -1839,36 +1746,13 @@ export async function importBackupJSON(parsedData) {
     throw new Error('No valid projects or employees data found in this backup file.')
   }
 
-  if (isSupabaseConfigured && supabase) {
-    if (prjsToImport) {
-      for (const p of prjsToImport) {
-        const dbP = mapProjectToDb(p)
-        if (p.id) {
-          await supabase.from('projects').upsert({ id: p.id, ...dbP })
-        } else {
-          await supabase.from('projects').insert([dbP])
-        }
-      }
-    }
-    if (empsToImport) {
-      for (const e of empsToImport) {
-        const dbE = mapEmployeeToDb(e)
-        if (e.id) {
-          await supabase.from('employees').upsert({ id: e.id, ...dbE })
-        } else {
-          await supabase.from('employees').insert([dbE])
-        }
-      }
-    }
-  } else {
-    if (prjsToImport) {
-      fallbackProjects = prjsToImport
-      saveStoredProjects(fallbackProjects)
-    }
-    if (empsToImport) {
-      fallbackEmployees = empsToImport
-      saveStoredEmployees(fallbackEmployees)
-    }
+  if (prjsToImport) {
+    fallbackProjects = prjsToImport
+    saveStoredProjects(fallbackProjects)
+  }
+  if (empsToImport) {
+    fallbackEmployees = empsToImport
+    saveStoredEmployees(fallbackEmployees)
   }
 
   if (typeof window !== 'undefined') {
@@ -1879,28 +1763,17 @@ export async function importBackupJSON(parsedData) {
     success: true,
     projectsImported: prjsToImport ? prjsToImport.length : 0,
     employeesImported: empsToImport ? empsToImport.length : 0,
-    exportedAt: parsedData.exportedAt || parsedData.formattedDate || 'Cloud Backup',
+    exportedAt: parsedData.exportedAt || parsedData.formattedDate || 'Backup',
   }
 }
 
 export async function resetStoredData() {
-  if (isSupabaseConfigured && supabase) {
-    await supabase.from('projects').delete().neq('id', 0)
-    await supabase.from('employees').delete().neq('id', 0)
-    for (const p of INITIAL_DATA.projects || []) {
-      await supabase.from('projects').insert([mapProjectToDb(p)])
-    }
-    for (const e of INITIAL_DATA.employees || []) {
-      await supabase.from('employees').insert([mapEmployeeToDb(e)])
-    }
-  } else {
-    fallbackProjects = (INITIAL_DATA.projects || []).map(p => ({ ...p }))
-    fallbackEmployees = (INITIAL_DATA.employees || [])
-      .filter(e => e.empId !== 'Need' && !(e.nameEn || '').toLowerCase().startsWith('need'))
-      .map(e => ({ ...e }))
-    saveStoredProjects(fallbackProjects)
-    saveStoredEmployees(fallbackEmployees)
-  }
+  fallbackProjects = (INITIAL_DATA.projects || []).map(p => ({ ...p }))
+  fallbackEmployees = (INITIAL_DATA.employees || [])
+    .filter(e => e.empId !== 'Need' && !(e.nameEn || '').toLowerCase().startsWith('need'))
+    .map(e => ({ ...e }))
+  saveStoredProjects(fallbackProjects)
+  saveStoredEmployees(fallbackEmployees)
 
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('pt_data_updated', { detail: { type: 'reset' } }))

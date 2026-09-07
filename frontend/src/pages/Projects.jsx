@@ -25,6 +25,9 @@ function calc5DaysPrior(dateStr) {
 function getBusyTeamsForCategory(category, excludeId, projectList = []) {
   const busyMap = {}
   const allCat = getAllTeamsForCategory(category, projectList)
+  if (!allCat || allCat.length === 0) {
+    return busyMap
+  }
 
   const otherProjects = (projectList || []).filter(
     other =>
@@ -50,10 +53,11 @@ function getBusyTeamsForCategory(category, excludeId, projectList = []) {
             busyMap[t] = p.jobCard || `Project #${p.id}`
           })
         } else {
-          // Otherwise, it only locks its primary base team (Team A)!
-          // All helper teams (Team B, Team C, Team D, Team E) stay AVAILABLE for subsequent projects!
-          const baseTeam = allCat[0] || 'A'
-          busyMap[baseTeam] = p.jobCard || `Project #${p.id}`
+          // Otherwise, it only locks its primary base team if teams exist
+          const baseTeam = allCat.length > 0 ? allCat[0] : null
+          if (baseTeam) {
+            busyMap[baseTeam] = p.jobCard || `Project #${p.id}`
+          }
         }
       } else {
         // Subsequent projects lock their chosen teams
@@ -326,6 +330,11 @@ export default function Projects({ onOpenBackup }) {
           setSelectedTeams(defaultChoice)
           updated.team = defaultChoice.join(', ')
         }
+      } else if (!val || allTeams.length === 0) {
+        if (allTeams.length === 0) {
+          setSelectedTeams([])
+          updated.team = ''
+        }
       }
       return updated
     })
@@ -340,16 +349,24 @@ export default function Projects({ onOpenBackup }) {
       const available = allTeams.filter(t => !busyMap[t]).sort()
 
       if (updated.expStart || updated.actStart) {
-        const isFirst = Object.keys(busyMap).length === 0
-        if (isFirst) {
-          setSelectedTeams(available)
-          updated.team = available.join(', ')
+        if (available.length > 0) {
+          const isFirst = Object.keys(busyMap).length === 0
+          if (isFirst) {
+            setSelectedTeams(available)
+            updated.team = available.join(', ')
+          } else {
+            const stillValid = selectedTeams.filter(t => available.includes(t))
+            const newChoice = stillValid.length > 0 ? stillValid : (available.length > 0 ? [available[0]] : [])
+            setSelectedTeams(newChoice)
+            updated.team = newChoice.join(', ')
+          }
         } else {
-          const stillValid = selectedTeams.filter(t => available.includes(t))
-          const newChoice = stillValid.length > 0 ? stillValid : (available.length > 0 ? [available[0]] : [])
-          setSelectedTeams(newChoice)
-          updated.team = newChoice.join(', ')
+          setSelectedTeams([])
+          updated.team = ''
         }
+      } else {
+        setSelectedTeams([])
+        updated.team = ''
       }
       return updated
     })
@@ -733,100 +750,118 @@ export default function Projects({ onOpenBackup }) {
                     marginTop: '6px',
                   }}
                 >
-                  {/* Render Available Teams as Checkbox Cards */}
-                  {availableTeamsForEditing.map(t => {
-                    const isSelected = selectedTeams.includes(t)
-
-                    return (
-                      <label
-                        key={t}
-                        onClick={() => toggleTeamSelection(t)}
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '8px',
-                          padding: '7px 14px',
-                          borderRadius: '10px',
-                          cursor: 'pointer',
-                          userSelect: 'none',
-                          transition: 'all 0.18s ease',
-                          border: isSelected
-                            ? '2px solid #1a6fc4'
-                            : '1.5px solid #cbd5e1',
-                          background: isSelected
-                            ? '#eff6ff'
-                            : '#ffffff',
-                          color: isSelected
-                            ? '#1e40af'
-                            : '#1e293b',
-                          fontWeight: isSelected ? 700 : 500,
-                          fontSize: '12.5px',
-                          boxShadow: isSelected
-                            ? '0 2px 8px rgba(26, 111, 196, 0.15)'
-                            : '0 1px 3px rgba(0, 0, 0, 0.04)',
-                        }}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={isSelected}
-                          onChange={() => {}}
-                          style={{
-                            cursor: 'pointer',
-                            width: '15px',
-                            height: '15px',
-                            accentColor: '#1a6fc4',
-                          }}
-                        />
-                        <span>Team {t}</span>
-                      </label>
-                    )
-                  })}
-
-                  {/* Render Occupied / Locked Teams */}
-                  {Object.entries(busyTeamsMap).map(([t, jobCard]) => (
+                  {allCategoryTeams.length === 0 ? (
                     <div
-                      key={t}
-                      title={`Team ${t} is busy and locked on active project ${jobCard}`}
                       style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '8px',
-                        padding: '7px 14px',
-                        borderRadius: '10px',
-                        cursor: 'not-allowed',
-                        userSelect: 'none',
-                        border: '1.5px dashed #cbd5e1',
+                        padding: '10px 14px',
                         background: '#f8fafc',
-                        color: '#94a3b8',
-                        fontSize: '12.5px',
-                        opacity: 0.85,
+                        border: '1.5px dashed #cbd5e1',
+                        borderRadius: '8px',
+                        fontSize: '12px',
+                        color: '#64748b',
+                        width: '100%',
                       }}
                     >
-                      <input
-                        type="checkbox"
-                        checked={false}
-                        disabled
-                        style={{
-                          cursor: 'not-allowed',
-                          width: '15px',
-                          height: '15px',
-                        }}
-                      />
-                      <span>🔒 Team {t}</span>
-                      <span
-                        style={{
-                          fontSize: '10px',
-                          background: '#fee2e2',
-                          color: '#991b1b',
-                          padding: '1px 6px',
-                          borderRadius: '8px',
-                          fontWeight: 600,
-                        }}
-                      >
-                        Busy ({jobCard})
-                      </span>
+                      ℹ️ No teams are configured for category <strong>{currentCategory}</strong>. No team will be deployed. (You can configure teams via Category Settings).
                     </div>
-                  ))}
+                  ) : (
+                    <>
+                      {/* Render Available Teams as Checkbox Cards */}
+                      {availableTeamsForEditing.map(t => {
+                        const isSelected = selectedTeams.includes(t)
+
+                        return (
+                          <label
+                            key={t}
+                            onClick={() => toggleTeamSelection(t)}
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '8px',
+                              padding: '7px 14px',
+                              borderRadius: '10px',
+                              cursor: 'pointer',
+                              userSelect: 'none',
+                              transition: 'all 0.18s ease',
+                              border: isSelected
+                                ? '2px solid #1a6fc4'
+                                : '1.5px solid #cbd5e1',
+                              background: isSelected
+                                ? '#eff6ff'
+                                : '#ffffff',
+                              color: isSelected
+                                ? '#1e40af'
+                                : '#1e293b',
+                              fontWeight: isSelected ? 700 : 500,
+                              fontSize: '12.5px',
+                              boxShadow: isSelected
+                                ? '0 2px 8px rgba(26, 111, 196, 0.15)'
+                                : '0 1px 3px rgba(0, 0, 0, 0.04)',
+                            }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => {}}
+                              style={{
+                                cursor: 'pointer',
+                                width: '15px',
+                                height: '15px',
+                                accentColor: '#1a6fc4',
+                              }}
+                            />
+                            <span>Team {t}</span>
+                          </label>
+                        )
+                      })}
+
+                      {/* Render Occupied / Locked Teams */}
+                      {Object.entries(busyTeamsMap).map(([t, jobCard]) => (
+                        <div
+                          key={t}
+                          title={`Team ${t} is busy and locked on active project ${jobCard}`}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '8px',
+                            padding: '7px 14px',
+                            borderRadius: '10px',
+                            cursor: 'not-allowed',
+                            userSelect: 'none',
+                            border: '1.5px dashed #cbd5e1',
+                            background: '#f8fafc',
+                            color: '#94a3b8',
+                            fontSize: '12.5px',
+                            opacity: 0.85,
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={false}
+                            disabled
+                            style={{
+                              cursor: 'not-allowed',
+                              width: '15px',
+                              height: '15px',
+                            }}
+                          />
+                          <span>🔒 Team {t}</span>
+                          <span
+                            style={{
+                              fontSize: '10px',
+                              background: '#fee2e2',
+                              color: '#991b1b',
+                              padding: '1px 6px',
+                              borderRadius: '8px',
+                              fontWeight: 600,
+                            }}
+                          >
+                            Busy ({jobCard})
+                          </span>
+                        </div>
+                      ))}
+                    </>
+                  )}
                 </div>
 
                 {selectedTeams.length > 0 && (

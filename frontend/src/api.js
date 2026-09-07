@@ -403,13 +403,16 @@ export function computeDashboardFromData(prjs = [], emps = []) {
     catTeams[catName] = new Set(validTeams)
   })
 
-  // Add any employee teams
+  // Add any employee teams ONLY for categories that have teams configured
   emps.forEach(e => {
     const c = getCategory(e.project)
     const t = (e.team || '').replace(/team/i, '').trim().toUpperCase()
-    if (c && c !== 'All' && c !== 'Oil Spill' && t && t !== '-') {
-      if (!catTeams[c]) catTeams[c] = new Set()
-      catTeams[c].add(t)
+    if (c && c !== 'All' && t && t !== '-') {
+      const definedTeams = getAllTeamsForCategory(c)
+      if (definedTeams.length > 0) {
+        if (!catTeams[c]) catTeams[c] = new Set()
+        catTeams[c].add(t)
+      }
     }
   })
 
@@ -456,7 +459,16 @@ export function computeDashboardFromData(prjs = [], emps = []) {
 
   Object.entries(catRelevantProjects).forEach(([cat, activeList]) => {
     const allCatTeams = Array.from(catTeams[cat] || []).sort()
-    if (!allCatTeams.length || !activeList.length) return
+    if (!allCatTeams.length || !activeList.length) {
+      activeList.forEach(p => {
+        const explicit = (p.team || '')
+          .split(',')
+          .map(t => t.replace(/team/i, '').trim().toUpperCase())
+          .filter(Boolean)
+        projectAssignedTeams[p.id] = explicit
+      })
+      return
+    }
 
     const getOtherExplicitReserved = excludeId => {
       const reserved = new Set()
@@ -478,12 +490,12 @@ export function computeDashboardFromData(prjs = [], emps = []) {
         .filter(Boolean)
       if (explicit.length > 0) {
         projectAssignedTeams[p1.id] = explicit
-        explicit.forEach(t => usedTeams[cat].set(t, p1.jobCard))
+        explicit.forEach(t => usedTeams[cat]?.set(t, p1.jobCard))
       } else {
         const otherReserved = getOtherExplicitReserved(p1.id)
         const p1Teams = allCatTeams.filter(t => !otherReserved.has(t))
-        projectAssignedTeams[p1.id] = p1Teams.length > 0 ? p1Teams : [allCatTeams[0]]
-        projectAssignedTeams[p1.id].forEach(t => usedTeams[cat].set(t, p1.jobCard))
+        projectAssignedTeams[p1.id] = p1Teams.length > 0 ? p1Teams : (allCatTeams.length > 0 ? [allCatTeams[0]] : [])
+        projectAssignedTeams[p1.id].forEach(t => usedTeams[cat]?.set(t, p1.jobCard))
       }
     } else {
       const p1 = activeList[0]
@@ -499,7 +511,7 @@ export function computeDashboardFromData(prjs = [], emps = []) {
           projectAssignedTeams[pi.id] = explicit
           explicit.forEach(t => {
             claimedBySubsequent.add(t)
-            usedTeams[cat].set(t, pi.jobCard)
+            usedTeams[cat]?.set(t, pi.jobCard)
           })
         } else {
           let chosen = ''
@@ -521,7 +533,9 @@ export function computeDashboardFromData(prjs = [], emps = []) {
           if (chosen) {
             claimedBySubsequent.add(chosen)
             projectAssignedTeams[pi.id] = [chosen]
-            usedTeams[cat].set(chosen, pi.jobCard)
+            usedTeams[cat]?.set(chosen, pi.jobCard)
+          } else {
+            projectAssignedTeams[pi.id] = []
           }
         }
       }
@@ -534,11 +548,11 @@ export function computeDashboardFromData(prjs = [], emps = []) {
       if (explicit1.length > 0) {
         const p1Teams = explicit1.filter(t => !claimedBySubsequent.has(t))
         projectAssignedTeams[p1.id] = p1Teams.length > 0 ? p1Teams : explicit1
-        projectAssignedTeams[p1.id].forEach(t => usedTeams[cat].set(t, p1.jobCard))
+        projectAssignedTeams[p1.id].forEach(t => usedTeams[cat]?.set(t, p1.jobCard))
       } else {
         const p1Teams = allCatTeams.filter(t => !claimedBySubsequent.has(t))
-        projectAssignedTeams[p1.id] = p1Teams.length > 0 ? p1Teams : [allCatTeams[0]]
-        projectAssignedTeams[p1.id].forEach(t => usedTeams[cat].set(t, p1.jobCard))
+        projectAssignedTeams[p1.id] = p1Teams.length > 0 ? p1Teams : (allCatTeams.length > 0 ? [allCatTeams[0]] : [])
+        projectAssignedTeams[p1.id].forEach(t => usedTeams[cat]?.set(t, p1.jobCard))
       }
     }
   })
@@ -567,15 +581,15 @@ export function computeDashboardFromData(prjs = [], emps = []) {
       .map(t => t.replace(/team/i, '').trim().toUpperCase())
       .filter(Boolean)
 
-    // Preserve assigned teams for Completed projects as well!
+    // Preserve assigned teams for Completed and Active projects only if teams exist for category
     let assignedTeams = []
     if (projectAssignedTeams[p.id]?.length > 0) {
       assignedTeams = projectAssignedTeams[p.id]
     } else if (explicit.length > 0) {
       assignedTeams = explicit
-    } else if (status === 'Completed' || status === 'Active') {
+    } else if ((status === 'Completed' || status === 'Active') && allTeams.length > 0) {
       // Historical/default assigned team for completed/active projects
-      assignedTeams = [allTeams[0] || 'A']
+      assignedTeams = [allTeams[0]]
     }
 
     let assignedEmps = []

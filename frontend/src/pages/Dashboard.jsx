@@ -34,13 +34,22 @@ function calc5DaysPrior(dateStr) {
 }
 
 function fmtDate(d) {
-  if (!d) return '—'
+  if (!d || d === '-' || d === '—') return '—'
+  const str = String(d).trim()
+  if (!str) return '—'
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+    const [yyyy, mm, dd] = str.split('-')
+    return `${dd}-${mm}-${yyyy}`
+  }
   try {
-    const dt = new Date(d)
-    if (isNaN(dt.getTime())) return d
-    return dt.toISOString().split('T')[0]
+    const dt = new Date(str)
+    if (isNaN(dt.getTime())) return str
+    const dd = String(dt.getDate()).padStart(2, '0')
+    const mm = String(dt.getMonth() + 1).padStart(2, '0')
+    const yyyy = dt.getFullYear()
+    return `${dd}-${mm}-${yyyy}`
   } catch {
-    return d
+    return str
   }
 }
 
@@ -265,19 +274,23 @@ export default function Dashboard({ onOpenBackup }) {
       .filter(Boolean)
 
     let initialTeams = []
-    if (explicit.length > 0) {
+    if (isOverlapped || (s && available.length === 0)) {
+      initialTeams = []
+    } else if (!s) {
+      initialTeams = explicit
+    } else if (explicit.length > 0) {
       initialTeams = explicit.filter(t => !busyMap[t])
-      if (initialTeams.length === 0) initialTeams = explicit
+      if (initialTeams.length === 0 && available.length > 0) {
+        initialTeams = [available[0]]
+      }
     } else if (p.status === 'Active' && p.assignedTeams && p.assignedTeams.length > 0) {
       initialTeams = p.assignedTeams.filter(t => !busyMap[t])
-    } else if (isOverlapped) {
-      initialTeams = []
     } else if (available.length > 0) {
       const isFirst = Object.keys(busyMap).length === 0
       initialTeams = isFirst ? available : [available[0]]
     }
 
-    const currentMob = p.mobDate || calc5DaysPrior(s)
+    const currentMob = p.mobDate || (s ? calc5DaysPrior(s) : '')
 
     setForm({
       jobCard: p.jobCard || '',
@@ -286,7 +299,7 @@ export default function Dashboard({ onOpenBackup }) {
       project: p.project || '',
       desc: p.desc || '',
       unit: p.unit ?? '',
-      qty: p.qty ?? 0,
+      qty: p.qty ?? p.productQty ?? 0,
       location: p.location || '',
       mobDate: currentMob,
       expStart: p.expStart || '',
@@ -306,87 +319,70 @@ export default function Dashboard({ onOpenBackup }) {
     const isStart = field === 'actStart' || field === 'expStart'
     const newMob = isStart ? calc5DaysPrior(val) : null
 
-    setForm(f => {
-      const updated = {
-        ...f,
-        [field]: val,
-        ...(newMob ? { mobDate: newMob } : {}),
-      }
+    const updatedForm = {
+      ...form,
+      [field]: val,
+      ...(newMob !== null ? { mobDate: newMob } : {}),
+    }
 
-      const cat = getCategory(updated.project)
-      const s = (updated.actStart || updated.expStart || '').trim()
-      const e = (updated.actEnd || updated.expEnd || '').trim()
+    const cat = getCategory(updatedForm.project)
+    const s = (updatedForm.actStart || updatedForm.expStart || '').trim()
+    const e = (updatedForm.actEnd || updatedForm.expEnd || '').trim()
 
-      const { busyMap, available, isOverlapped } =
-        getBusyTeamsForCategoryAndDates(cat, editId, s, e, board)
+    const { busyMap, available, isOverlapped } =
+      getBusyTeamsForCategoryAndDates(cat, editId, s, e, board)
 
-      if (s) {
-        if (isOverlapped || available.length === 0) {
-          // If project dates overlap and 0 teams available, clear selection
-          setSelectedTeams([])
-          updated.team = ''
-        } else if (available.length > 0) {
-          const isFirst = Object.keys(busyMap).length === 0
-          if (isFirst) {
-            setSelectedTeams(available)
-            updated.team = available.join(', ')
-          } else {
-            const valid = selectedTeams.filter(t => available.includes(t))
-            const choice = valid.length > 0 ? valid : [available[0]]
-            setSelectedTeams(choice)
-            updated.team = choice.join(', ')
-          }
-        }
+    let nextTeams = []
+    if (s && !isOverlapped && available.length > 0) {
+      const isFirst = Object.keys(busyMap).length === 0
+      if (isFirst) {
+        nextTeams = available
       } else {
-        setSelectedTeams([])
-        updated.team = ''
+        const stillValid = selectedTeams.filter(t => available.includes(t))
+        nextTeams = stillValid.length > 0 ? stillValid : [available[0]]
       }
-      return updated
-    })
+    } else {
+      nextTeams = []
+    }
+
+    updatedForm.team = nextTeams.join(', ')
+    setSelectedTeams(nextTeams)
+    setForm(updatedForm)
   }
 
   const handleProjectChange = val => {
-    setForm(f => {
-      const updated = { ...f, project: val }
-      const cat = getCategory(val)
-      const s = (updated.actStart || updated.expStart || '').trim()
-      const e = (updated.actEnd || updated.expEnd || '').trim()
+    const updatedForm = { ...form, project: val }
+    const cat = getCategory(val)
+    const s = (updatedForm.actStart || updatedForm.expStart || '').trim()
+    const e = (updatedForm.actEnd || updatedForm.expEnd || '').trim()
 
-      const { busyMap, available, isOverlapped } =
-        getBusyTeamsForCategoryAndDates(cat, editId, s, e, board)
+    const { busyMap, available, isOverlapped } =
+      getBusyTeamsForCategoryAndDates(cat, editId, s, e, board)
 
-      if (s) {
-        if (isOverlapped || available.length === 0) {
-          setSelectedTeams([])
-          updated.team = ''
-        } else {
-          const isFirst = Object.keys(busyMap).length === 0
-          if (isFirst) {
-            setSelectedTeams(available)
-            updated.team = available.join(', ')
-          } else {
-            const valid = selectedTeams.filter(t => available.includes(t))
-            const choice = valid.length > 0 ? valid : [available[0]]
-            setSelectedTeams(choice)
-            updated.team = choice.join(', ')
-          }
-        }
+    let nextTeams = []
+    if (s && !isOverlapped && available.length > 0) {
+      const isFirst = Object.keys(busyMap).length === 0
+      if (isFirst) {
+        nextTeams = available
       } else {
-        setSelectedTeams([])
-        updated.team = ''
+        const stillValid = selectedTeams.filter(t => available.includes(t))
+        nextTeams = stillValid.length > 0 ? stillValid : [available[0]]
       }
-      return updated
-    })
+    } else {
+      nextTeams = []
+    }
+
+    updatedForm.team = nextTeams.join(', ')
+    setSelectedTeams(nextTeams)
+    setForm(updatedForm)
   }
 
   const toggleTeamSelection = teamName => {
-    setSelectedTeams(prev => {
-      const next = prev.includes(teamName)
-        ? prev.filter(t => t !== teamName)
-        : [...prev, teamName].sort()
-      setForm(f => ({ ...f, team: next.join(', ') }))
-      return next
-    })
+    const next = selectedTeams.includes(teamName)
+      ? selectedTeams.filter(t => t !== teamName)
+      : [...selectedTeams, teamName].sort()
+    setSelectedTeams(next)
+    setForm(f => ({ ...f, team: next.join(', ') }))
   }
 
   const saveForm = async () => {
@@ -422,7 +418,7 @@ export default function Dashboard({ onOpenBackup }) {
   )
 
   const currentCategory = getCategory(form.project || currentEditingProject?.project)
-  const allCategoryTeams = getAllTeamsForCategory(currentCategory, board)
+  const allCategoryTeams = getAllTeamsForCategory(currentCategory)
   const formStartDate = (form.actStart || form.expStart || '').trim()
   const formEndDate = (form.actEnd || form.expEnd || '').trim()
   const {
@@ -433,6 +429,7 @@ export default function Dashboard({ onOpenBackup }) {
   } = getBusyTeamsForCategoryAndDates(currentCategory, editId, formStartDate, formEndDate, board)
   const isFirstProjectInCategory =
     !isOverlapped &&
+    Boolean(formStartDate) &&
     Object.keys(busyTeamsMap).length === 0 &&
     availableTeamsForEditing.length > 0
 

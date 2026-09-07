@@ -11,13 +11,22 @@ const CATEGORY_COLORS = {
 }
 
 function fmtDate(d) {
-  if (!d) return '—'
+  if (!d || d === '-' || d === '—') return '—'
+  const str = String(d).trim()
+  if (!str) return '—'
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+    const [yyyy, mm, dd] = str.split('-')
+    return `${dd}-${mm}-${yyyy}`
+  }
   try {
-    const dt = new Date(d)
-    if (isNaN(dt.getTime())) return d
-    return dt.toISOString().split('T')[0]
+    const dt = new Date(str)
+    if (isNaN(dt.getTime())) return str
+    const dd = String(dt.getDate()).padStart(2, '0')
+    const mm = String(dt.getMonth() + 1).padStart(2, '0')
+    const yyyy = dt.getFullYear()
+    return `${dd}-${mm}-${yyyy}`
   } catch {
-    return d
+    return str
   }
 }
 

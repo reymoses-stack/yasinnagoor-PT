@@ -7,6 +7,8 @@ import {
   getCategories,
   getCategory,
   getAllTeamsForCategory,
+  checkDateOverlap,
+  getBusyTeamsForCategoryAndDates,
 } from '../api'
 import { INITIAL_DATA } from '../seedData'
 import AssignedModal from '../components/AssignedModal'
@@ -252,13 +254,14 @@ export default function Dashboard({ onOpenBackup }) {
   // OPEN EDIT MODAL WITH DYNAMIC TEAM AVAILABILITY & BUSY DETECTION
   const openEdit = p => {
     const cat = p.category || getCategory(p.project)
-    const allTeams = getAllTeamsForCategory(cat, board)
-    const busyMap = getBusyTeamsForCategory(cat, p.id, board)
-    const available = allTeams.filter(t => !busyMap[t]).sort()
+    const s = (p.actStart || p.expStart || '').trim()
+    const e = (p.actEnd || p.expEnd || '').trim()
+    const { busyMap, overlappingProjects, available, isOverlapped } =
+      getBusyTeamsForCategoryAndDates(cat, p.id, s, e, board)
 
     const explicit = (p.team || '')
       .split(',')
-      .map(t => t.replace(/team/i, '').trim())
+      .map(t => t.replace(/team/i, '').trim().toUpperCase())
       .filter(Boolean)
 
     let initialTeams = []
@@ -267,12 +270,13 @@ export default function Dashboard({ onOpenBackup }) {
       if (initialTeams.length === 0) initialTeams = explicit
     } else if (p.status === 'Active' && p.assignedTeams && p.assignedTeams.length > 0) {
       initialTeams = p.assignedTeams.filter(t => !busyMap[t])
+    } else if (isOverlapped) {
+      initialTeams = []
     } else if (available.length > 0) {
       const isFirst = Object.keys(busyMap).length === 0
       initialTeams = isFirst ? available : [available[0]]
     }
 
-    const s = p.actStart || p.expStart || ''
     const currentMob = p.mobDate || calc5DaysPrior(s)
 
     setForm({
@@ -298,35 +302,44 @@ export default function Dashboard({ onOpenBackup }) {
     setShowForm(true)
   }
 
-  const handleStartDateChange = (field, val) => {
-    const newMob = calc5DaysPrior(val)
+  const handleDateChange = (field, val) => {
+    const isStart = field === 'actStart' || field === 'expStart'
+    const newMob = isStart ? calc5DaysPrior(val) : null
+
     setForm(f => {
       const updated = {
         ...f,
         [field]: val,
-        mobDate: newMob || f.mobDate,
+        ...(newMob ? { mobDate: newMob } : {}),
       }
 
       const cat = getCategory(updated.project)
-      const allTeams = getAllTeamsForCategory(cat, board)
-      const busyMap = getBusyTeamsForCategory(cat, editId, board)
-      const available = allTeams.filter(t => !busyMap[t]).sort()
+      const s = (updated.actStart || updated.expStart || '').trim()
+      const e = (updated.actEnd || updated.expEnd || '').trim()
 
-      if (val && available.length > 0) {
-        const isFirst = Object.keys(busyMap).length === 0
-        if (isFirst) {
-          setSelectedTeams(available)
-          updated.team = available.join(', ')
-        } else if (selectedTeams.length === 0) {
-          const defaultChoice = [available[0]]
-          setSelectedTeams(defaultChoice)
-          updated.team = defaultChoice.join(', ')
-        }
-      } else if (!val || allTeams.length === 0) {
-        if (allTeams.length === 0) {
+      const { busyMap, available, isOverlapped } =
+        getBusyTeamsForCategoryAndDates(cat, editId, s, e, board)
+
+      if (s) {
+        if (isOverlapped || available.length === 0) {
+          // If project dates overlap and 0 teams available, clear selection
           setSelectedTeams([])
           updated.team = ''
+        } else if (available.length > 0) {
+          const isFirst = Object.keys(busyMap).length === 0
+          if (isFirst) {
+            setSelectedTeams(available)
+            updated.team = available.join(', ')
+          } else {
+            const valid = selectedTeams.filter(t => available.includes(t))
+            const choice = valid.length > 0 ? valid : [available[0]]
+            setSelectedTeams(choice)
+            updated.team = choice.join(', ')
+          }
         }
+      } else {
+        setSelectedTeams([])
+        updated.team = ''
       }
       return updated
     })
@@ -336,25 +349,27 @@ export default function Dashboard({ onOpenBackup }) {
     setForm(f => {
       const updated = { ...f, project: val }
       const cat = getCategory(val)
-      const allTeams = getAllTeamsForCategory(cat, board)
-      const busyMap = getBusyTeamsForCategory(cat, editId, board)
-      const available = allTeams.filter(t => !busyMap[t]).sort()
+      const s = (updated.actStart || updated.expStart || '').trim()
+      const e = (updated.actEnd || updated.expEnd || '').trim()
 
-      if (updated.expStart || updated.actStart) {
-        if (available.length > 0) {
+      const { busyMap, available, isOverlapped } =
+        getBusyTeamsForCategoryAndDates(cat, editId, s, e, board)
+
+      if (s) {
+        if (isOverlapped || available.length === 0) {
+          setSelectedTeams([])
+          updated.team = ''
+        } else {
           const isFirst = Object.keys(busyMap).length === 0
           if (isFirst) {
             setSelectedTeams(available)
             updated.team = available.join(', ')
           } else {
-            const stillValid = selectedTeams.filter(t => available.includes(t))
-            const newChoice = stillValid.length > 0 ? stillValid : (available.length > 0 ? [available[0]] : [])
-            setSelectedTeams(newChoice)
-            updated.team = newChoice.join(', ')
+            const valid = selectedTeams.filter(t => available.includes(t))
+            const choice = valid.length > 0 ? valid : [available[0]]
+            setSelectedTeams(choice)
+            updated.team = choice.join(', ')
           }
-        } else {
-          setSelectedTeams([])
-          updated.team = ''
         }
       } else {
         setSelectedTeams([])
@@ -408,9 +423,18 @@ export default function Dashboard({ onOpenBackup }) {
 
   const currentCategory = getCategory(form.project || currentEditingProject?.project)
   const allCategoryTeams = getAllTeamsForCategory(currentCategory, board)
-  const busyTeamsMap = getBusyTeamsForCategory(currentCategory, editId, board)
-  const availableTeamsForEditing = allCategoryTeams.filter(t => !busyTeamsMap[t])
-  const isFirstProjectInCategory = Object.keys(busyTeamsMap).length === 0
+  const formStartDate = (form.actStart || form.expStart || '').trim()
+  const formEndDate = (form.actEnd || form.expEnd || '').trim()
+  const {
+    busyMap: busyTeamsMap,
+    overlappingProjects,
+    available: availableTeamsForEditing,
+    isOverlapped,
+  } = getBusyTeamsForCategoryAndDates(currentCategory, editId, formStartDate, formEndDate, board)
+  const isFirstProjectInCategory =
+    !isOverlapped &&
+    Object.keys(busyTeamsMap).length === 0 &&
+    availableTeamsForEditing.length > 0
 
   const kpiCards = [
     {
@@ -821,7 +845,7 @@ export default function Dashboard({ onOpenBackup }) {
                     <td className="td-center">{fmtDate(p.actStart)}</td>
                     <td className="td-center">{fmtDate(p.actEnd)}</td>
                     <td className="td-left">{p.assignedTo || '—'}</td>
-                    {/* Assigned Teams Pills (Alphabetical) */}
+                    {/* Assigned Teams Pills (Alphabetical) or Overlap Warning */}
                     <td className="td-left">
                       {p.assignedTeams && p.assignedTeams.length > 0 ? (
                         <div
@@ -848,6 +872,31 @@ export default function Dashboard({ onOpenBackup }) {
                             </span>
                           ))}
                         </div>
+                      ) : p.isOverlapped ? (
+                        <span
+                          title={
+                            p.overlapConflicts && p.overlapConflicts.length > 0
+                              ? `⚠️ Dates Overlapped: Dates overlap with active project(s) ${p.overlapConflicts.map(c => `${c.jobCard} (${c.startDate || '—'} to ${c.endDate || '—'})`).join(', ')}. All category teams in use.`
+                              : '⚠️ Project dates overlap with another active project. No teams available.'
+                          }
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            padding: '3px 9px',
+                            borderRadius: '12px',
+                            background: '#fff1f2',
+                            color: '#be123c',
+                            fontSize: '11px',
+                            fontWeight: 700,
+                            border: '1px solid #fecdd3',
+                            boxShadow: '0 1px 2px rgba(225, 29, 72, 0.08)',
+                            cursor: 'help',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          ⚠️ Dates Overlapped
+                        </span>
                       ) : p.team ? (
                         <span
                           style={{
@@ -988,7 +1037,21 @@ export default function Dashboard({ onOpenBackup }) {
                   >
                     👥 Team Allocation ({currentCategory})
                   </strong>
-                  {isFirstProjectInCategory ? (
+                  {isOverlapped ? (
+                    <span
+                      style={{
+                        fontSize: '11px',
+                        background: '#fee2e2',
+                        color: '#991b1b',
+                        padding: '2px 9px',
+                        borderRadius: '12px',
+                        fontWeight: 700,
+                        border: '1px solid #fecdd3',
+                      }}
+                    >
+                      ⚠️ Dates Overlapped (No Team Assigned)
+                    </span>
+                  ) : isFirstProjectInCategory ? (
                     <span
                       style={{
                         fontSize: '11px',
@@ -1022,15 +1085,60 @@ export default function Dashboard({ onOpenBackup }) {
                 <span
                   style={{
                     fontSize: '11.5px',
-                    color: '#64748b',
+                    color: isOverlapped ? '#be123c' : '#64748b',
                     display: 'block',
                     marginBottom: '10px',
+                    fontWeight: isOverlapped ? 600 : 400,
                   }}
                 >
-                  {isFirstProjectInCategory
+                  {isOverlapped
+                    ? '⚠️ Expected start and end dates overlap with another active project. No teams are available to assign during this period.'
+                    : isFirstProjectInCategory
                     ? 'Entering Expected Start Date will automatically assign all available teams to this initial project.'
                     : 'Select team(s) to assign to this project by checking the box. Already busy teams are locked.'}
                 </span>
+
+                {/* Overlap Alert Notification */}
+                {isOverlapped && overlappingProjects.length > 0 && (
+                  <div
+                    style={{
+                      padding: '10px 14px',
+                      background: '#fff1f2',
+                      border: '1.5px solid #fecdd3',
+                      borderRadius: '10px',
+                      color: '#9f1239',
+                      fontSize: '12px',
+                      marginBottom: '12px',
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontWeight: 700,
+                        fontSize: '13px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        marginBottom: '4px',
+                      }}
+                    >
+                      <span>⚠️</span> Project Dates Are Overlapped
+                    </div>
+                    <div>
+                      No team can be assigned to this project because all <strong>{currentCategory}</strong> teams are currently deployed to active project(s) during this scheduled date window ({fmtDate(formStartDate)} to {fmtDate(formEndDate)}):
+                    </div>
+                    <ul style={{ margin: '6px 0 0 18px', padding: 0 }}>
+                      {overlappingProjects.map(op => (
+                        <li key={op.id}>
+                          <strong>{op.jobCard}</strong> ({fmtDate(op.startDate)} to {fmtDate(op.endDate)}) — {op.teams.map(t => `Team ${t}`).join(', ')}
+                        </li>
+                      ))}
+                    </ul>
+                    <div style={{ marginTop: '6px', fontSize: '11px', color: '#be123c' }}>
+                      💡 Adjust this project's Expected / Actual Start & End dates to a period when category teams are free to assign teams.
+                    </div>
+                  </div>
+                )}
 
                 <div
                   style={{
@@ -1316,7 +1424,7 @@ export default function Dashboard({ onOpenBackup }) {
                     type="date"
                     value={form.expStart || ''}
                     onChange={e =>
-                      handleStartDateChange('expStart', e.target.value)
+                      handleDateChange('expStart', e.target.value)
                     }
                   />
                 </div>
@@ -1327,7 +1435,7 @@ export default function Dashboard({ onOpenBackup }) {
                     type="date"
                     value={form.expEnd || ''}
                     onChange={e =>
-                      setForm(f => ({ ...f, expEnd: e.target.value }))
+                      handleDateChange('expEnd', e.target.value)
                     }
                   />
                 </div>
@@ -1349,7 +1457,7 @@ export default function Dashboard({ onOpenBackup }) {
                     type="date"
                     value={form.actStart || ''}
                     onChange={e =>
-                      handleStartDateChange('actStart', e.target.value)
+                      handleDateChange('actStart', e.target.value)
                     }
                   />
                 </div>
@@ -1360,7 +1468,7 @@ export default function Dashboard({ onOpenBackup }) {
                     type="date"
                     value={form.actEnd || ''}
                     onChange={e =>
-                      setForm(f => ({ ...f, actEnd: e.target.value }))
+                      handleDateChange('actEnd', e.target.value)
                     }
                   />
                 </div>

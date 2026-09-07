@@ -421,6 +421,30 @@ export default function KpiDetailModal({ type, kpis = {}, projects = [], pools =
                               </span>
                             ))}
                           </div>
+                        ) : p.isOverlapped ? (
+                          <span
+                            title={
+                              p.overlapConflicts && p.overlapConflicts.length > 0
+                                ? `⚠️ Dates Overlapped: Dates overlap with active project(s) ${p.overlapConflicts.map(c => `${c.jobCard} (${fmtDate(c.startDate)} to ${fmtDate(c.endDate)})`).join(', ')}. All category teams in use.`
+                                : '⚠️ Project dates overlap with another active project. No teams available.'
+                            }
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              padding: '2px 7px',
+                              borderRadius: '10px',
+                              background: '#fff1f2',
+                              color: '#be123c',
+                              fontSize: '10.5px',
+                              fontWeight: 700,
+                              border: '1px solid #fecdd3',
+                              cursor: 'help',
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            ⚠️ Dates Overlapped
+                          </span>
                         ) : p.team ? (
                           <span style={{ fontSize: '11px', color: '#64748b' }}>
                             Team {p.team}

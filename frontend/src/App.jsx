@@ -2,7 +2,9 @@ import { useState, useEffect } from 'react'
 import Dashboard from './pages/Dashboard'
 import Projects from './pages/Projects'
 import Workforce from './pages/Workforce'
+import Login from './pages/Login'
 import BackupModal from './components/BackupModal'
+import { useAuth } from './context/AuthContext'
 import './index.css'
 
 const TABS = [
@@ -51,6 +53,7 @@ function getLocalTimeData() {
 }
 
 export default function App() {
+  const { user, isAuthenticated, loading, signOut } = useAuth()
   const [tab, setTab] = useState('dashboard')
   const [timeData, setTimeData] = useState(getLocalTimeData)
   const [showBackup, setShowBackup] = useState(false)
@@ -61,6 +64,30 @@ export default function App() {
     }, 1000)
     return () => clearInterval(timer)
   }, [])
+
+  if (loading) {
+    return (
+      <div className="app-loading-screen">
+        <div className="app-loading-box">
+          <img
+            src="/PT_Logo.png"
+            alt="Pioneers Technical Logo"
+            className="app-loading-logo"
+            onError={(e) => {
+              e.target.onerror = null
+              e.target.src = 'https://pt-tgc.com/wp-content/uploads/2022/03/PT_Logo.png'
+            }}
+          />
+          <div className="app-loading-spinner" />
+          <p className="app-loading-text">Connecting to Pioneers Cloud Database...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (!isAuthenticated) {
+    return <Login />
+  }
 
   return (
     <div className="app-container">
@@ -95,7 +122,7 @@ export default function App() {
             </a>
           </div>
 
-          {/* Center: Dynamic Island Navigation Capsule (Without Icons) */}
+          {/* Center: Dynamic Island Navigation Capsule */}
           <div className="dynamic-island-capsule">
             {TABS.map(t => (
               <button
@@ -109,16 +136,31 @@ export default function App() {
             ))}
           </div>
 
-          {/* Right: Data Backup & Live Clock Panel */}
+          {/* Right: Data Backup, User Info, Logout & Live Clock Panel */}
           <div className="nav-right-cluster">
             <button
               className="island-backup-btn"
               onClick={() => setShowBackup(true)}
-              title="Backup & Restore Data across laptops"
+              title="Backup & Restore Data"
             >
               <span className="backup-icon">💾</span>
-              <span className="backup-text">Backup &amp; Sync</span>
+              <span className="backup-text">Backup</span>
             </button>
+
+            {/* User Session Capsule & Sign Out */}
+            <div className="nav-user-badge" title={`Signed in as: ${user?.email || 'User'}`}>
+              <span className="nav-user-dot" />
+              <span className="nav-user-email">
+                {(user?.email || 'User').split('@')[0]}
+              </span>
+              <button
+                className="nav-logout-btn"
+                onClick={() => signOut()}
+                title="Sign Out"
+              >
+                Sign Out
+              </button>
+            </div>
 
             <div className="nav-clock-panel">
               <div className="clock-badge">
@@ -168,5 +210,3 @@ export default function App() {
     </div>
   )
 }
-
-

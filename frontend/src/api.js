@@ -1,6 +1,7 @@
 // Pioneer Technical Resource Management System API Client
 import XLSX from 'xlsx-js-style'
 import { INITIAL_DATA } from './seedData.js'
+import { supabase } from './supabase.js'
 
 export const DEFAULT_CATEGORIES = [
   {
@@ -429,23 +430,24 @@ function mapProjectRow(p) {
 // Helper: Normalize UI Model to DB Project row
 function mapProjectToDb(p) {
   const s = p.actStart || p.expStart || ''
-  const jc = p.jobCard || ''
+  const jc = p.jobCard || p.job_card || ''
   const prj = jc === 'JC-2026-008' ? 'Oil Spill' : (p.project || '')
   return {
+    id: String(p.id),
     job_card: jc,
     contract: p.contract || '',
-    service_order: p.serviceOrder || '',
+    service_order: p.serviceOrder || p.service_order || '',
     project: prj,
     desc: p.desc || '',
     unit: p.unit ?? '',
     qty: Number(p.qty ?? p.productQty ?? 0),
     location: p.location || '',
-    mob_date: p.mobDate || (s ? calc5DaysPrior(s) : ''),
-    exp_start: p.expStart || '',
-    exp_end: p.expEnd || '',
-    act_start: p.actStart || '',
-    act_end: p.actEnd || '',
-    assigned_to: p.assignedTo || '',
+    mob_date: p.mobDate || p.mob_date || (s ? calc5DaysPrior(s) : ''),
+    exp_start: p.expStart || p.exp_start || '',
+    exp_end: p.expEnd || p.exp_end || '',
+    act_start: p.actStart || p.act_start || '',
+    act_end: p.actEnd || p.act_end || '',
+    assigned_to: p.assignedTo || p.assigned_to || '',
     team: p.team || '',
     remarks: p.remarks || '',
   }
@@ -475,19 +477,21 @@ function mapEmployeeRow(e) {
 // Helper: Normalize UI Model to DB Employee row
 function mapEmployeeToDb(e) {
   return {
-    emp_id: e.empId || '',
-    name_en: e.nameEn || '',
-    name_ar: e.nameAr || '',
+    id: String(e.id),
+    name: e.nameEn || e.name || '',
+    emp_id: e.empId || e.emp_id || '',
+    name_en: e.nameEn || e.name_en || '',
+    name_ar: e.nameAr || e.name_ar || '',
     project: e.project || '',
     team: e.team || '',
-    job_cat: e.jobCat || '',
-    vehicle_type: e.vehicleType || '-',
+    job_cat: e.jobCat || e.job_cat || '',
+    vehicle_type: e.vehicleType || e.vehicle_type || '-',
     plate: e.plate || '-',
     brand: e.brand || '-',
-    sec_expiry: e.secExpiry || '-',
-    vehicle_status: e.vehicleStatus || 'N/A',
-    gate_pass: e.gatePass || 'N/A',
-    tools_box: e.toolsBox || '-',
+    sec_expiry: e.secExpiry || e.sec_expiry || '-',
+    vehicle_status: e.vehicleStatus || e.vehicle_status || 'N/A',
+    gate_pass: e.gatePass || e.gate_pass || 'N/A',
+    tools_box: e.toolsBox || e.tools_box || '-',
   }
 }
 
@@ -868,14 +872,79 @@ export function computeDashboardFromData(prjs = [], emps = []) {
 }
 
 // ----------------------------------------------------
-// PROJECTS API (Local & Realtime State)
+// PROJECTS API (Supabase Cloud + Local Cache)
 // ----------------------------------------------------
+let isProjectsSeeded = false
 export const getProjectsRaw = async (params = {}) => {
+  const localList = getStoredProjects()
+  try {
+    const { data, error } = await supabase
+      .from('projects')
+      .select('*')
+      .order('id', { ascending: true })
+
+    if (!error && data) {
+      if (data.length === 0 && localList.length > 0) {
+        // First load on empty database: push all local projects to Supabase
+        const toInsert = localList.map(mapProjectToDb)
+        await supabase.from('projects').upsert(toInsert)
+        fallbackProjects = localList
+      } else {
+        const dbIdSet = new Set(data.map(p => String(p.id)))
+        const missingFromDb = localList.filter(p => !dbIdSet.has(String(p.id)))
+
+        if (missingFromDb.length > 0) {
+          // If browser has extra projects that were entered before Supabase was added, upload them!
+          const toUpload = missingFromDb.map(mapProjectToDb)
+          supabase.from('projects').upsert(toUpload).then(({ error: upErr }) => {
+            if (upErr) console.warn('Supabase local sync notice:', upErr.message)
+          })
+          const mappedDb = data.map(mapProjectRow).filter(Boolean)
+          fallbackProjects = [...mappedDb, ...missingFromDb]
+          saveStoredProjects(fallbackProjects)
+        } else {
+          const mapped = data.map(mapProjectRow).filter(Boolean)
+          fallbackProjects = mapped
+          saveStoredProjects(fallbackProjects)
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Supabase projects fetch notice (using cache):', err)
+  }
+
   let list = fallbackProjects
   if (params.project) {
     list = list.filter(p => p.project === params.project)
   }
   return { data: list }
+}
+
+// Explicit 1-Click Sync Local Data to Cloud
+export async function syncLocalToCloud() {
+  const localPrjs = getStoredProjects()
+  const localEmps = getStoredEmployees()
+
+  let pCount = 0
+  let eCount = 0
+
+  if (localPrjs.length > 0) {
+    const toInsert = localPrjs.map(mapProjectToDb)
+    const { error: pErr } = await supabase.from('projects').upsert(toInsert)
+    if (!pErr) pCount = localPrjs.length
+  }
+
+  if (localEmps.length > 0) {
+    const toInsert = localEmps.map(mapEmployeeToDb)
+    const { error: eErr } = await supabase.from('employees').upsert(toInsert)
+    if (!eErr) eCount = localEmps.length
+  }
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('pt_data_updated', { detail: { type: 'cloud_synced' } }))
+  }
+
+  return { projectCount: pCount, employeeCount: eCount }
 }
 
 export const getProjects = async (params = {}) => {
@@ -891,10 +960,17 @@ export const getProjects = async (params = {}) => {
 }
 
 export const createProject = async body => {
-  const newId = fallbackProjects.length > 0 ? Math.max(...fallbackProjects.map(p => p.id || 0)) + 1 : 1
+  const newId = fallbackProjects.length > 0 ? Math.max(...fallbackProjects.map(p => Number(p.id) || 0)) + 1 : 1
   const newPrj = { ...body, id: newId }
   fallbackProjects.push(newPrj)
   saveStoredProjects(fallbackProjects)
+
+  try {
+    await supabase.from('projects').insert(mapProjectToDb(newPrj))
+  } catch (err) {
+    console.warn('Supabase create project notice:', err)
+  }
+
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('pt_data_updated', { detail: { type: 'project_created' } }))
   }
@@ -903,22 +979,42 @@ export const createProject = async body => {
 
 export const updateProject = async (id, body) => {
   const numId = Number(id)
-  const idx = fallbackProjects.findIndex(p => p.id === numId)
+  const idx = fallbackProjects.findIndex(p => Number(p.id) === numId || String(p.id) === String(id))
+  let updated = { ...body, id: isNaN(numId) ? id : numId }
   if (idx !== -1) {
-    fallbackProjects[idx] = { ...fallbackProjects[idx], ...body, id: numId }
-    saveStoredProjects(fallbackProjects)
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('pt_data_updated', { detail: { type: 'project_updated' } }))
-    }
-    return fallbackProjects[idx]
+    fallbackProjects[idx] = { ...fallbackProjects[idx], ...body, id: fallbackProjects[idx].id }
+    updated = fallbackProjects[idx]
+  } else {
+    fallbackProjects.push(updated)
   }
-  return body
+  saveStoredProjects(fallbackProjects)
+
+  try {
+    await supabase
+      .from('projects')
+      .upsert(mapProjectToDb(updated), { onConflict: 'id' })
+  } catch (err) {
+    console.warn('Supabase update project notice:', err)
+  }
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('pt_data_updated', { detail: { type: 'project_updated' } }))
+  }
+  return updated
 }
 
 export const deleteProject = async id => {
+  const strId = String(id)
   const numId = Number(id)
-  fallbackProjects = fallbackProjects.filter(p => p.id !== numId)
+  fallbackProjects = fallbackProjects.filter(p => String(p.id) !== strId && Number(p.id) !== numId)
   saveStoredProjects(fallbackProjects)
+
+  try {
+    await supabase.from('projects').delete().eq('id', strId)
+  } catch (err) {
+    console.warn('Supabase delete project notice:', err)
+  }
+
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('pt_data_updated', { detail: { type: 'project_deleted' } }))
   }
@@ -927,7 +1023,7 @@ export const deleteProject = async id => {
 
 export const getAssigned = async id => {
   const dash = await getDashboard()
-  const prj = dash.projects.find(p => p.id === Number(id))
+  const prj = dash.projects.find(p => p.id === Number(id) || String(p.id) === String(id))
   return {
     data: {
       project: prj,
@@ -941,9 +1037,31 @@ export const getAssigned = async id => {
 }
 
 // ----------------------------------------------------
-// EMPLOYEES API (Local & Realtime State)
+// EMPLOYEES API (Supabase Cloud + Local Cache)
 // ----------------------------------------------------
+let isEmployeesSeeded = false
 export const getEmployees = async (params = {}) => {
+  try {
+    const { data, error } = await supabase
+      .from('employees')
+      .select('*')
+      .order('id', { ascending: true })
+
+    if (!error && data && data.length > 0) {
+      const mapped = data.map(mapEmployeeRow).filter(Boolean)
+      fallbackEmployees = mapped
+      saveStoredEmployees(fallbackEmployees)
+    } else if (!error && data && data.length === 0 && fallbackEmployees.length > 0 && !isEmployeesSeeded) {
+      isEmployeesSeeded = true
+      const toInsert = fallbackEmployees.map(mapEmployeeToDb)
+      supabase.from('employees').insert(toInsert).then(({ error: seedErr }) => {
+        if (seedErr) console.warn('Supabase employees initial seed notice:', seedErr.message)
+      })
+    }
+  } catch (err) {
+    console.warn('Supabase employees fetch notice (using cache):', err)
+  }
+
   let list = fallbackEmployees
   if (params.search) {
     const q = params.search.toLowerCase()
@@ -961,10 +1079,17 @@ export const getEmployees = async (params = {}) => {
 }
 
 export const createEmployee = async body => {
-  const newId = fallbackEmployees.length > 0 ? Math.max(...fallbackEmployees.map(e => e.id || 0)) + 1 : 1
+  const newId = fallbackEmployees.length > 0 ? Math.max(...fallbackEmployees.map(e => Number(e.id) || 0)) + 1 : 1
   const newEmp = { ...body, id: newId }
   fallbackEmployees.push(newEmp)
   saveStoredEmployees(fallbackEmployees)
+
+  try {
+    await supabase.from('employees').insert(mapEmployeeToDb(newEmp))
+  } catch (err) {
+    console.warn('Supabase create employee notice:', err)
+  }
+
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('pt_data_updated', { detail: { type: 'employee_created' } }))
   }
@@ -973,22 +1098,42 @@ export const createEmployee = async body => {
 
 export const updateEmployee = async (id, body) => {
   const numId = Number(id)
-  const idx = fallbackEmployees.findIndex(e => e.id === numId)
+  const idx = fallbackEmployees.findIndex(e => Number(e.id) === numId || String(e.id) === String(id))
+  let updated = { ...body, id: isNaN(numId) ? id : numId }
   if (idx !== -1) {
-    fallbackEmployees[idx] = { ...fallbackEmployees[idx], ...body, id: numId }
-    saveStoredEmployees(fallbackEmployees)
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('pt_data_updated', { detail: { type: 'employee_updated' } }))
-    }
-    return fallbackEmployees[idx]
+    fallbackEmployees[idx] = { ...fallbackEmployees[idx], ...body, id: fallbackEmployees[idx].id }
+    updated = fallbackEmployees[idx]
+  } else {
+    fallbackEmployees.push(updated)
   }
-  return body
+  saveStoredEmployees(fallbackEmployees)
+
+  try {
+    await supabase
+      .from('employees')
+      .upsert(mapEmployeeToDb(updated), { onConflict: 'id' })
+  } catch (err) {
+    console.warn('Supabase update employee notice:', err)
+  }
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('pt_data_updated', { detail: { type: 'employee_updated' } }))
+  }
+  return updated
 }
 
 export const deleteEmployee = async id => {
+  const strId = String(id)
   const numId = Number(id)
-  fallbackEmployees = fallbackEmployees.filter(e => e.id !== numId)
+  fallbackEmployees = fallbackEmployees.filter(e => String(e.id) !== strId && Number(e.id) !== numId)
   saveStoredEmployees(fallbackEmployees)
+
+  try {
+    await supabase.from('employees').delete().eq('id', strId)
+  } catch (err) {
+    console.warn('Supabase delete employee notice:', err)
+  }
+
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('pt_data_updated', { detail: { type: 'employee_deleted' } }))
   }
@@ -1005,15 +1150,46 @@ export const getDashboard = async () => {
   return computeDashboardFromData(prjs, emps)
 }
 
-// Realtime Subscriber
+// Realtime Subscriber with Supabase PostgreSQL Channel
 export function subscribeToSupabase(callback) {
   if (typeof window === 'undefined') return () => {}
   const handler = () => {
     callback && callback()
   }
   window.addEventListener('pt_data_updated', handler)
+
+  let channel = null
+  try {
+    channel = supabase
+      .channel('pt_cloud_realtime')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'projects' },
+        () => {
+          getProjectsRaw().then(() => {
+            callback && callback()
+          })
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'employees' },
+        () => {
+          getEmployees().then(() => {
+            callback && callback()
+          })
+        }
+      )
+      .subscribe()
+  } catch (e) {
+    console.warn('Supabase realtime listener notice:', e)
+  }
+
   return () => {
     window.removeEventListener('pt_data_updated', handler)
+    if (channel) {
+      supabase.removeChannel(channel)
+    }
   }
 }
 

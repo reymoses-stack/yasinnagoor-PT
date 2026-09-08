@@ -4,14 +4,20 @@ import {
   downloadBackupJSON,
   importBackupJSON,
   resetStoredData,
+  syncLocalToCloud,
 } from '../api'
 import './BackupModal.css'
 
 export default function BackupModal({ onClose }) {
-  const [activeTab, setActiveTab] = useState('export') // 'export' | 'import' | 'reset'
+  const [activeTab, setActiveTab] = useState('cloud') // 'cloud' | 'export' | 'import' | 'reset'
   const [exportStats, setExportStats] = useState(null)
   const [exportSuccess, setExportSuccess] = useState(false)
   const [exportedFileName, setExportedFileName] = useState('')
+
+  // Cloud Sync State
+  const [syncingCloud, setSyncingCloud] = useState(false)
+  const [syncSuccess, setSyncSuccess] = useState(false)
+  const [syncResult, setSyncResult] = useState(null)
 
   // Import State
   const [importedFile, setImportedFile] = useState(null)
@@ -50,6 +56,23 @@ export default function BackupModal({ onClose }) {
     },
     [onClose]
   )
+
+  const handleCloudSync = async () => {
+    setSyncingCloud(true)
+    setSyncSuccess(false)
+    try {
+      const res = await syncLocalToCloud()
+      setSyncResult(res)
+      setSyncSuccess(true)
+      const stats = await createBackupPayload()
+      setExportStats(stats)
+      setTimeout(() => setSyncSuccess(false), 6000)
+    } catch (err) {
+      alert('Cloud Sync Error: ' + err.message)
+    } finally {
+      setSyncingCloud(false)
+    }
+  }
 
   // --- Export Action ---
   const handleExport = async () => {
@@ -169,6 +192,12 @@ export default function BackupModal({ onClose }) {
         {/* Navigation Tabs */}
         <div className="bk-tabs">
           <button
+            className={`bk-tab-btn ${activeTab === 'cloud' ? 'active' : ''}`}
+            onClick={() => setActiveTab('cloud')}
+          >
+            <span>☁️</span> Cloud Database Sync
+          </button>
+          <button
             className={`bk-tab-btn ${activeTab === 'export' ? 'active' : ''}`}
             onClick={() => setActiveTab('export')}
           >
@@ -190,6 +219,63 @@ export default function BackupModal({ onClose }) {
 
         {/* Body Content */}
         <div className="bk-body">
+          {/* TAB 0: CLOUD SYNC */}
+          {activeTab === 'cloud' && (
+            <div className="bk-section">
+              <div className="bk-desc-box">
+                <div className="bk-desc-title">☁️ Supabase Real-Time Cloud Persistence</div>
+                <div className="bk-desc-text">
+                  Your projects and workforce data are synchronized with the <strong>Pioneers Technical Cloud Database</strong>.
+                  Click the button below at any time to force an instant push of all browser data to the cloud.
+                </div>
+              </div>
+
+              {exportStats && (
+                <div className="bk-stats-grid">
+                  <div className="bk-stat-card">
+                    <span className="bk-stat-val">{exportStats.projects?.length || 0}</span>
+                    <span className="bk-stat-lbl">Active Projects</span>
+                  </div>
+                  <div className="bk-stat-card">
+                    <span className="bk-stat-val c-blue">{exportStats.employees?.length || 0}</span>
+                    <span className="bk-stat-lbl">Workforce Staff</span>
+                  </div>
+                  <div className="bk-stat-card">
+                    <span className="bk-stat-val c-green">
+                      Online
+                    </span>
+                    <span className="bk-stat-lbl">Cloud Status</span>
+                  </div>
+                  <div className="bk-stat-card">
+                    <span className="bk-stat-val">5</span>
+                    <span className="bk-stat-lbl">Pool Categories</span>
+                  </div>
+                </div>
+              )}
+
+              {syncSuccess && syncResult && (
+                <div className="bk-alert success" style={{ marginTop: '1rem' }}>
+                  <span className="bk-alert-icon">✅</span>
+                  <div>
+                    <strong>Cloud Sync Complete!</strong>
+                    <div style={{ fontSize: '12px', marginTop: '2px', color: '#166534' }}>
+                      Successfully pushed <strong>{syncResult.projectCount}</strong> projects and <strong>{syncResult.employeeCount}</strong> workforce records to Supabase.
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="bk-actions-row" style={{ marginTop: '1.25rem' }}>
+                <button
+                  className="bk-primary-btn green"
+                  disabled={syncingCloud}
+                  onClick={handleCloudSync}
+                >
+                  <span>☁️</span> {syncingCloud ? 'Syncing with Supabase...' : 'Push All Browser Data to Cloud Database'}
+                </button>
+              </div>
+            </div>
+          )}
           {/* TAB 1: EXPORT */}
           {activeTab === 'export' && (
             <div className="bk-section">

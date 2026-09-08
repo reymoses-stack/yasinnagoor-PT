@@ -251,59 +251,102 @@ html, body {
   letter-spacing: -0.01em;
 }
 
-/* Right Clock & Timezone Panel */
+/* Live Operations Time Capsule */
 .nav-clock-panel {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  justify-content: flex-end;
+  flex-shrink: 0;
 }
 
 .clock-badge {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  background: rgba(255, 255, 255, 0.75);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(210, 225, 245, 0.7);
-  padding: 4px 10px;
-  border-radius: 10px;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.02);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(240, 246, 255, 0.90));
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(26, 111, 196, 0.22);
+  padding: 0.32rem 0.7rem;
+  border-radius: 11px;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  user-select: none;
 }
 
-.clock-time-row {
+.clock-badge:hover {
+  border-color: rgba(26, 111, 196, 0.45);
+  box-shadow: 0 3px 10px rgba(26, 111, 196, 0.12);
+}
+
+.live-pulse-container {
+  position: relative;
+  width: 8px;
+  height: 8px;
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  font-weight: 700;
-  color: #1e293b;
-  font-family: ui-monospace, "SF Mono", monospace;
-  letter-spacing: -0.02em;
+  justify-content: center;
+  flex-shrink: 0;
 }
 
 .live-pulse-dot {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: #22c55e;
-  box-shadow: 0 0 8px #22c55e;
-  display: inline-block;
-  animation: livePulse 2s infinite;
+  background: #10b981;
+  box-shadow: 0 0 6px #10b981;
+  z-index: 2;
 }
 
-@keyframes livePulse {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.45; transform: scale(0.85); }
+.live-pulse-ring {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(16, 185, 129, 0.55);
+  animation: livePulseRing 2s cubic-bezier(0.24, 0, 0.38, 1) infinite;
+  z-index: 1;
 }
 
-.clock-date-row {
-  font-size: 10.5px;
-  color: #64748b;
-  font-weight: 500;
+@keyframes livePulseRing {
+  0% { transform: scale(0.5); opacity: 1; }
+  100% { transform: scale(1.6); opacity: 0; }
+}
+
+.clock-time-display {
+  font-family: ui-monospace, "SF Mono", "Fira Code", Menlo, monospace;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #0f172a;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.clock-divider {
+  width: 1px;
+  height: 16px;
+  background: rgba(203, 213, 225, 0.9);
+  flex-shrink: 0;
+}
+
+.clock-meta-display {
   display: flex;
-  gap: 4px;
+  flex-direction: column;
+  align-items: flex-start;
+  line-height: 1.18;
+}
+
+.clock-date-text {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #334155;
+  white-space: nowrap;
+}
+
+.clock-tz-text {
+  font-size: 9px;
+  font-weight: 600;
+  color: #1a6fc4;
   white-space: nowrap;
 }
 
@@ -1078,7 +1121,17 @@ html, body {
     padding: 0 1rem;
     gap: 0.65rem;
   }
-  .clock-date-row {
+  .clock-badge {
+    padding: 0.28rem 0.55rem;
+    gap: 0.45rem;
+  }
+  .clock-time-display {
+    font-size: 12.5px;
+  }
+  .clock-date-text {
+    font-size: 9.5px;
+  }
+  .clock-tz-text {
     display: none;
   }
   .nav-user-email {
@@ -1157,6 +1210,24 @@ html, body {
     gap: 0.35rem;
   }
   .nav-clock-panel {
+    display: flex;
+    flex-shrink: 0;
+  }
+  .clock-badge {
+    padding: 0.25rem 0.45rem;
+    gap: 0.35rem;
+    border-radius: 9px;
+  }
+  .clock-time-display {
+    font-size: 11.5px;
+  }
+  .clock-divider {
+    height: 12px;
+  }
+  .clock-date-text {
+    font-size: 9px;
+  }
+  .clock-tz-text {
     display: none;
   }
   .island-backup-btn {
@@ -1374,6 +1445,19 @@ html, body {
   .brand-logo-container {
     width: 32px;
     height: 32px;
+  }
+  .clock-badge {
+    padding: 0.22rem 0.38rem;
+    gap: 0.28rem;
+  }
+  .clock-time-display {
+    font-size: 11px;
+  }
+  .clock-divider {
+    display: none;
+  }
+  .clock-meta-display {
+    display: none;
   }
   .backup-text {
     display: none;

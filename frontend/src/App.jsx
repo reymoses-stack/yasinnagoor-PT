@@ -16,12 +16,23 @@ const TABS = [
 function getLocalTimeData() {
   const now = new Date()
 
-  // Date formatted: "Mon, 31 Aug 2026"
+  // Full date formatted: "Tue, 08 Sep 2026"
   const dateStr = now.toLocaleDateString('en-GB', {
     weekday: 'short',
     day: '2-digit',
     month: 'short',
     year: 'numeric',
+  })
+
+  // Short date formatted: "08 Sep"
+  const dateShort = now.toLocaleDateString('en-GB', {
+    day: '2-digit',
+    month: 'short',
+  })
+
+  // Day of week: "Tue"
+  const dayName = now.toLocaleDateString('en-GB', {
+    weekday: 'short',
   })
 
   // Time formatted with seconds in 24-hour format: "23:34:51"
@@ -40,6 +51,8 @@ function getLocalTimeData() {
     timeZone = 'Local'
   }
 
+  const tzShort = timeZone ? timeZone.split('/').pop().replace(/_/g, ' ') : 'Local'
+
   // Timezone Offset: e.g. "GMT+5:30"
   const offset = -now.getTimezoneOffset()
   const sign = offset >= 0 ? '+' : '-'
@@ -49,7 +62,7 @@ function getLocalTimeData() {
     mins > 0 ? `:${mins < 10 ? '0' : ''}${mins}` : ''
   }`
 
-  return { dateStr, timeStr, timeZone, offsetStr }
+  return { dateStr, dateShort, dayName, timeStr, timeZone, tzShort, offsetStr }
 }
 
 export default function App() {
@@ -136,8 +149,31 @@ export default function App() {
             ))}
           </div>
 
-          {/* Right: Data Backup, User Info, Logout & Live Clock Panel */}
+          {/* Right: Live Operations Clock, Data Backup, User Info, Logout */}
           <div className="nav-right-cluster">
+            {/* Live Operations Timestamp Capsule */}
+            <div className="nav-clock-panel">
+              <div
+                className="clock-badge"
+                title={`Live System Operations Time: ${timeData.timeStr} | ${timeData.dateStr} (${timeData.timeZone || timeData.offsetStr})`}
+              >
+                <div className="live-pulse-container">
+                  <span className="live-pulse-dot" />
+                  <span className="live-pulse-ring" />
+                </div>
+                <span className="clock-time-display">
+                  {timeData.timeStr}
+                </span>
+                <div className="clock-divider" />
+                <div className="clock-meta-display">
+                  <span className="clock-date-text">{timeData.dateStr}</span>
+                  <span className="clock-tz-text">
+                    {timeData.tzShort} ({timeData.offsetStr})
+                  </span>
+                </div>
+              </div>
+            </div>
+
             <button
               className="island-backup-btn"
               onClick={() => setShowBackup(true)}
@@ -160,25 +196,6 @@ export default function App() {
               >
                 Sign Out
               </button>
-            </div>
-
-            <div className="nav-clock-panel">
-              <div className="clock-badge">
-                <div className="clock-time-row">
-                  <span className="live-pulse-dot" title="Live Clock Active" />
-                  <span>{timeData.timeStr}</span>
-                </div>
-                <div className="clock-date-row">
-                  <span>{timeData.dateStr}</span>
-                  <span>•</span>
-                  <span style={{ color: '#1a6fc4', fontWeight: 600 }}>
-                    {timeData.timeZone
-                      ? timeData.timeZone.split('/').pop().replace(/_/g, ' ')
-                      : timeData.offsetStr}{' '}
-                    ({timeData.offsetStr})
-                  </span>
-                </div>
-              </div>
             </div>
           </div>
         </div>

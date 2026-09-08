@@ -274,18 +274,12 @@ export default function Dashboard({ onOpenBackup }) {
       .filter(Boolean)
 
     let initialTeams = []
-    if (isOverlapped || (s && available.length === 0)) {
-      initialTeams = []
-    } else if (!s) {
+    if (explicit.length > 0) {
+      // Always preserve user's assigned team(s) when opening edit modal
       initialTeams = explicit
-    } else if (explicit.length > 0) {
-      initialTeams = explicit.filter(t => !busyMap[t])
-      if (initialTeams.length === 0 && available.length > 0) {
-        initialTeams = [available[0]]
-      }
-    } else if (p.status === 'Active' && p.assignedTeams && p.assignedTeams.length > 0) {
-      initialTeams = p.assignedTeams.filter(t => !busyMap[t])
-    } else if (available.length > 0) {
+    } else if (p.assignedTeams && p.assignedTeams.length > 0) {
+      initialTeams = p.assignedTeams
+    } else if (s && available.length > 0) {
       const isFirst = Object.keys(busyMap).length === 0
       initialTeams = isFirst ? available : [available[0]]
     }
@@ -332,17 +326,11 @@ export default function Dashboard({ onOpenBackup }) {
     const { busyMap, available, isOverlapped } =
       getBusyTeamsForCategoryAndDates(cat, editId, s, e, board)
 
-    let nextTeams = []
-    if (s && !isOverlapped && available.length > 0) {
+    // If no teams were selected yet, auto-suggest the first free team
+    let nextTeams = selectedTeams
+    if (selectedTeams.length === 0 && s && available.length > 0) {
       const isFirst = Object.keys(busyMap).length === 0
-      if (isFirst) {
-        nextTeams = available
-      } else {
-        const stillValid = selectedTeams.filter(t => available.includes(t))
-        nextTeams = stillValid.length > 0 ? stillValid : [available[0]]
-      }
-    } else {
-      nextTeams = []
+      nextTeams = isFirst ? available : [available[0]]
     }
 
     updatedForm.team = nextTeams.join(', ')
@@ -359,22 +347,31 @@ export default function Dashboard({ onOpenBackup }) {
     const { busyMap, available, isOverlapped } =
       getBusyTeamsForCategoryAndDates(cat, editId, s, e, board)
 
-    let nextTeams = []
-    if (s && !isOverlapped && available.length > 0) {
+    let nextTeams = selectedTeams.filter(t => getAllTeamsForCategory(cat).includes(t))
+    if (nextTeams.length === 0 && s && available.length > 0) {
       const isFirst = Object.keys(busyMap).length === 0
-      if (isFirst) {
-        nextTeams = available
-      } else {
-        const stillValid = selectedTeams.filter(t => available.includes(t))
-        nextTeams = stillValid.length > 0 ? stillValid : [available[0]]
-      }
-    } else {
-      nextTeams = []
+      nextTeams = isFirst ? available : [available[0]]
     }
 
     updatedForm.team = nextTeams.join(', ')
     setSelectedTeams(nextTeams)
     setForm(updatedForm)
+  }
+
+  const autoSuggestTeam = () => {
+    const cat = getCategory(form.project)
+    const s = (form.actStart || form.expStart || '').trim()
+    const e = (form.actEnd || form.expEnd || '').trim()
+    const { busyMap, available } = getBusyTeamsForCategoryAndDates(cat, editId, s, e, board)
+    if (available.length > 0) {
+      const isFirst = Object.keys(busyMap).length === 0
+      const suggested = isFirst ? available : [available[0]]
+      setSelectedTeams(suggested)
+      setForm(f => ({ ...f, team: suggested.join(', ') }))
+    } else {
+      setSelectedTeams([])
+      setForm(f => ({ ...f, team: '' }))
+    }
   }
 
   const toggleTeamSelection = teamName => {
@@ -1066,74 +1063,105 @@ export default function Dashboard({ onOpenBackup }) {
                     <span
                       style={{
                         fontSize: '11px',
-                        background: '#eff6ff',
-                        color: '#1d4ed8',
+                        background: '#f8fafc',
+                        color: '#475569',
                         padding: '2px 9px',
                         borderRadius: '12px',
-                        fontWeight: 700,
-                        border: '1px solid #bfdbfe',
+                        fontWeight: 600,
+                        border: '1px solid #cbd5e1',
                       }}
                     >
-                      📌 Manual Team Selection (Busy teams locked 🔒)
+                      💡 Editable Team Selection (Click any team to assign/change)
                     </span>
                   )}
                 </div>
 
-                <span
+                <div
                   style={{
-                    fontSize: '11.5px',
-                    color: isOverlapped ? '#be123c' : '#64748b',
-                    display: 'block',
-                    marginBottom: '10px',
-                    fontWeight: isOverlapped ? 600 : 400,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    flexWrap: 'wrap',
+                    gap: '8px',
+                    marginBottom: '8px',
                   }}
                 >
-                  {isOverlapped
-                    ? '⚠️ Expected start and end dates overlap with another active project. No teams are available to assign during this period.'
-                    : isFirstProjectInCategory
-                    ? 'Entering Expected Start Date will automatically assign all available teams to this initial project.'
-                    : 'Select team(s) to assign to this project by checking the box. Already busy teams are locked.'}
-                </span>
-
-                {/* Overlap Alert Notification */}
-                {isOverlapped && overlappingProjects.length > 0 && (
-                  <div
+                  <span
                     style={{
-                      padding: '10px 14px',
-                      background: '#fff1f2',
-                      border: '1.5px solid #fecdd3',
-                      borderRadius: '10px',
-                      color: '#9f1239',
-                      fontSize: '12px',
-                      marginBottom: '12px',
-                      lineHeight: 1.5,
+                      fontSize: '11.5px',
+                      color: '#64748b',
                     }}
                   >
-                    <div
+                    Click any team below to assign or change. Free teams are suggested; in-use teams show current project overlap.
+                  </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <button
+                      type="button"
+                      onClick={autoSuggestTeam}
+                      title="Automatically find and assign the best free available team"
                       style={{
-                        fontWeight: 700,
-                        fontSize: '13px',
-                        display: 'flex',
+                        padding: '4px 10px',
+                        fontSize: '11px',
+                        fontWeight: 600,
+                        borderRadius: '6px',
+                        border: '1px solid #93c5fd',
+                        background: '#eff6ff',
+                        color: '#1d4ed8',
+                        cursor: 'pointer',
+                        display: 'inline-flex',
                         alignItems: 'center',
-                        gap: '6px',
-                        marginBottom: '4px',
+                        gap: '4px',
                       }}
                     >
-                      <span>⚠️</span> Project Dates Are Overlapped
-                    </div>
-                    <div>
-                      No team can be assigned to this project because all <strong>{currentCategory}</strong> teams are currently deployed to active project(s) during this scheduled date window ({fmtDate(formStartDate)} to {fmtDate(formEndDate)}):
-                    </div>
-                    <ul style={{ margin: '6px 0 0 18px', padding: 0 }}>
+                      <span>⚡</span> Auto-Assign Free Team
+                    </button>
+                    {selectedTeams.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedTeams([])
+                          setForm(f => ({ ...f, team: '' }))
+                        }}
+                        title="Clear team selection"
+                        style={{
+                          padding: '4px 8px',
+                          fontSize: '11px',
+                          fontWeight: 500,
+                          borderRadius: '6px',
+                          border: '1px solid #e2e8f0',
+                          background: '#f8fafc',
+                          color: '#64748b',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        ✕ Clear
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Overlap Schedule Info */}
+                {overlappingProjects.length > 0 && (
+                  <div
+                    style={{
+                      padding: '8px 12px',
+                      background: '#fff1f2',
+                      border: '1px solid #fecdd3',
+                      borderRadius: '8px',
+                      color: '#9f1239',
+                      fontSize: '11.5px',
+                      marginBottom: '10px',
+                      lineHeight: 1.45,
+                    }}
+                  >
+                    <strong>📅 Active Projects in this Date Window ({fmtDate(formStartDate)} to {fmtDate(formEndDate)}):</strong>
+                    <ul style={{ margin: '4px 0 0 16px', padding: 0 }}>
                       {overlappingProjects.map(op => (
                         <li key={op.id}>
                           <strong>{op.jobCard}</strong> ({fmtDate(op.startDate)} to {fmtDate(op.endDate)}) — {op.teams.map(t => `Team ${t}`).join(', ')}
                         </li>
                       ))}
                     </ul>
-                    <div style={{ marginTop: '6px', fontSize: '11px', color: '#be123c' }}>
-                      💡 Adjust this project's Expected / Actual Start & End dates to a period when category teams are free to assign teams.
-                    </div>
                   </div>
                 )}
 
@@ -1157,105 +1185,118 @@ export default function Dashboard({ onOpenBackup }) {
                         width: '100%',
                       }}
                     >
-                      ℹ️ No teams are configured for category <strong>{currentCategory}</strong>. No team will be deployed. (You can configure teams via Category Settings).
+                      ℹ️ No teams are configured for category <strong>{currentCategory}</strong>. (You can configure teams via Category Settings).
                     </div>
                   ) : (
-                    <>
-                      {/* Render Available Teams as Checkbox Cards */}
-                      {availableTeamsForEditing.map(t => {
-                        const isSelected = selectedTeams.includes(t)
+                    allCategoryTeams.map(t => {
+                      const isSelected = selectedTeams.includes(t)
+                      const busyEntry = busyTeamsMap[t]
+                      const isBusy = Boolean(busyEntry)
+                      const busyJobCard = typeof busyEntry === 'object' ? busyEntry.jobCard : busyEntry
+                      const busyDatesStr = typeof busyEntry === 'object' && busyEntry.startDate ? `${fmtDate(busyEntry.startDate)} to ${fmtDate(busyEntry.endDate)}` : ''
 
-                        return (
-                          <label
-                            key={t}
-                            onClick={() => toggleTeamSelection(t)}
-                            style={{
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: '8px',
-                              padding: '7px 14px',
-                              borderRadius: '10px',
-                              cursor: 'pointer',
-                              userSelect: 'none',
-                              transition: 'all 0.18s ease',
-                              border: isSelected
-                                ? '2px solid #1a6fc4'
-                                : '1.5px solid #cbd5e1',
-                              background: isSelected
-                                ? '#eff6ff'
-                                : '#ffffff',
-                              color: isSelected
-                                ? '#1e40af'
-                                : '#1e293b',
-                              fontWeight: isSelected ? 700 : 500,
-                              fontSize: '12.5px',
-                              boxShadow: isSelected
-                                ? '0 2px 8px rgba(26, 111, 196, 0.15)'
-                                : '0 1px 3px rgba(0, 0, 0, 0.04)',
-                            }}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={isSelected}
-                              onChange={() => {}}
-                              style={{
-                                cursor: 'pointer',
-                                width: '15px',
-                                height: '15px',
-                                accentColor: '#1a6fc4',
-                              }}
-                            />
-                            <span>Team {t}</span>
-                          </label>
-                        )
-                      })}
+                      let border = '1.5px solid #cbd5e1'
+                      let bg = '#ffffff'
+                      let color = '#1e293b'
+                      let boxShadow = '0 1px 3px rgba(0, 0, 0, 0.04)'
 
-                      {/* Render Occupied / Locked Teams */}
-                      {Object.entries(busyTeamsMap).map(([t, jobCard]) => (
+                      if (isSelected) {
+                        if (isBusy) {
+                          border = '2px solid #d97706'
+                          bg = '#fffbeb'
+                          color = '#92400e'
+                          boxShadow = '0 2px 8px rgba(217, 119, 6, 0.2)'
+                        } else {
+                          border = '2px solid #1a6fc4'
+                          bg = '#eff6ff'
+                          color = '#1e40af'
+                          boxShadow = '0 2px 8px rgba(26, 111, 196, 0.15)'
+                        }
+                      } else if (isBusy) {
+                        border = '1.5px dashed #fca5a5'
+                        bg = '#fff8f8'
+                        color = '#64748b'
+                      }
+
+                      return (
                         <div
                           key={t}
-                          title={`Team ${t} is busy and locked on active project ${jobCard}`}
+                          onClick={() => toggleTeamSelection(t)}
+                          title={isBusy ? `Team ${t} is currently in use on ${busyJobCard} (${busyDatesStr}). Click to assign or override.` : `Team ${t} is free. Click to assign.`}
                           style={{
                             display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '8px',
-                            padding: '7px 14px',
+                            flexDirection: 'column',
+                            gap: '4px',
+                            padding: '8px 12px',
                             borderRadius: '10px',
-                            cursor: 'not-allowed',
+                            cursor: 'pointer',
                             userSelect: 'none',
-                            border: '1.5px dashed #cbd5e1',
-                            background: '#f8fafc',
-                            color: '#94a3b8',
-                            fontSize: '12.5px',
-                            opacity: 0.85,
+                            transition: 'all 0.18s ease',
+                            border,
+                            background: bg,
+                            color,
+                            boxShadow,
+                            minWidth: '135px',
                           }}
                         >
-                          <input
-                            type="checkbox"
-                            checked={false}
-                            disabled
-                            style={{
-                              cursor: 'not-allowed',
-                              width: '15px',
-                              height: '15px',
-                            }}
-                          />
-                          <span>🔒 Team {t}</span>
-                          <span
-                            style={{
-                              fontSize: '10px',
-                              background: '#fee2e2',
-                              color: '#991b1b',
-                              padding: '1px 6px',
-                              borderRadius: '8px',
-                              fontWeight: 600,
-                            }}
-                          >
-                            Busy ({jobCard})
-                          </span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'space-between' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => {}}
+                                style={{
+                                  cursor: 'pointer',
+                                  width: '15px',
+                                  height: '15px',
+                                  accentColor: isBusy ? '#d97706' : '#1a6fc4',
+                                }}
+                              />
+                              <span style={{ fontWeight: isSelected ? 700 : 600, fontSize: '13px' }}>
+                                Team {t}
+                              </span>
+                            </div>
+                            {isSelected && (
+                              <span style={{ fontSize: '10px', fontWeight: 700, color: isBusy ? '#d97706' : '#1a6fc4' }}>
+                                ✓ Selected
+                              </span>
+                            )}
+                          </div>
+
+                          <div style={{ marginTop: '2px' }}>
+                            {isBusy ? (
+                              <span
+                                style={{
+                                  fontSize: '10px',
+                                  background: '#fee2e2',
+                                  color: '#991b1b',
+                                  padding: '1px 6px',
+                                  borderRadius: '6px',
+                                  fontWeight: 600,
+                                  display: 'inline-block',
+                                }}
+                              >
+                                ⚠️ In Use: {busyJobCard}
+                              </span>
+                            ) : (
+                              <span
+                                style={{
+                                  fontSize: '10px',
+                                  background: '#dcfce7',
+                                  color: '#166534',
+                                  padding: '1px 6px',
+                                  borderRadius: '6px',
+                                  fontWeight: 600,
+                                  display: 'inline-block',
+                                }}
+                              >
+                                ✓ Free &amp; Available
+                              </span>
+                            )}
+                          </div>
                         </div>
-                      ))}
-                    </>
+                      )
+                    })
                   )}
                 </div>
 
@@ -1274,6 +1315,11 @@ export default function Dashboard({ onOpenBackup }) {
                   >
                     ✓ Assigned to this project:{' '}
                     {[...selectedTeams].sort().map(t => `Team ${t}`).join(', ')}
+                    {selectedTeams.some(t => busyTeamsMap[t]) && (
+                      <div style={{ marginTop: '4px', fontSize: '11px', color: '#b45309', fontWeight: 500 }}>
+                        ⚠️ Notice: One or more selected teams overlap with another project schedule. Saving will assign this team as requested.
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

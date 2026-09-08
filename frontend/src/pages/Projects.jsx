@@ -25,7 +25,7 @@ function calc5DaysPrior(dateStr) {
 }
 
 const COLS = [
-  { key: 'id', label: '#', align: 'center' },
+  { key: 'id', label: 'S.No.', align: 'center' },
   { key: 'jobCard', label: 'Job Card No', align: 'left' },
   { key: 'contract', label: 'Contract No', align: 'left' },
   { key: 'serviceOrder', label: 'Service Order', align: 'left' },
@@ -163,7 +163,16 @@ export default function Projects({ onOpenBackup }) {
     let va = a[sort.col] ?? ''
     let vb = b[sort.col] ?? ''
 
-    if (sort.col === 'startDate') {
+    if (sort.col === 'id') {
+      const numA = Number(a.id)
+      const numB = Number(b.id)
+      if (!isNaN(numA) && !isNaN(numB)) {
+        return sort.dir === 'asc' ? numA - numB : numB - numA
+      }
+      return sort.dir === 'asc'
+        ? String(a.id || '').localeCompare(String(b.id || ''), undefined, { numeric: true, sensitivity: 'base' })
+        : String(b.id || '').localeCompare(String(a.id || ''), undefined, { numeric: true, sensitivity: 'base' })
+    } else if (sort.col === 'startDate') {
       va = a.actStart || a.expStart || ''
       vb = b.actStart || b.expStart || ''
     } else if (sort.col === 'endDate') {
@@ -178,21 +187,14 @@ export default function Projects({ onOpenBackup }) {
     }
 
     if (!isNaN(+va) && !isNaN(+vb) && va !== '' && vb !== '') {
-      va = +va
-      vb = +vb
-    } else {
-      va = String(va).toLowerCase()
-      vb = String(vb).toLowerCase()
+      return sort.dir === 'asc' ? +va - +vb : +vb - +va
     }
-    return va < vb
-      ? sort.dir === 'asc'
-        ? -1
-        : 1
-      : va > vb
-      ? sort.dir === 'asc'
-        ? 1
-        : -1
-      : 0
+
+    const strA = String(va)
+    const strB = String(vb)
+    return sort.dir === 'asc'
+      ? strA.localeCompare(strB, undefined, { numeric: true, sensitivity: 'base' })
+      : strB.localeCompare(strA, undefined, { numeric: true, sensitivity: 'base' })
   })
 
   const toggleSort = col =>

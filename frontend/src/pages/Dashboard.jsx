@@ -133,7 +133,7 @@ const EMPTY_PROJECT = {
 
 // DEFINED COLUMNS WITH EXPLICIT ALIGNMENTS FOR PERFECT VERTICAL & HORIZONTAL LAYOUT
 const COLS = [
-  { key: 'id', label: '#', align: 'center' },
+  { key: 'id', label: 'S.No.', align: 'center' },
   { key: 'jobCard', label: 'Job Card No', align: 'left' },
   { key: 'contract', label: 'Contract No', align: 'left' },
   { key: 'serviceOrder', label: 'Service Order', align: 'left' },
@@ -160,14 +160,17 @@ export default function Dashboard({ onOpenBackup }) {
   const [kpis, setKpis] = useState(fallback.kpis)
   const [pools, setPools] = useState(fallback.pools)
   const [board, setBoard] = useState(fallback.projects)
+  const [categories, setCategories] = useState(getCategories)
+  const [loading, setLoading] = useState(true)
+  const [sort, setSort] = useState({ col: 'id', dir: 'asc' })
   const [filterStatus, setFilterStatus] = useState('')
   const [filterCat, setFilterCat] = useState('')
-  const [sort, setSort] = useState({ col: 'id', dir: 'asc' })
+  const [showCategoryModal, setShowCategoryModal] = useState(false)
+  const [selectedPoolCat, setSelectedPoolCat] = useState(null)
   const [assigned, setAssigned] = useState(null)
   const [selectedTeam, setSelectedTeam] = useState(null)
   const [kpiModalType, setKpiModalType] = useState(null)
   const [showForm, setShowForm] = useState(false)
-  const [showCategoryModal, setShowCategoryModal] = useState(false)
   const [form, setForm] = useState(EMPTY_PROJECT)
   const [editId, setEditId] = useState(null)
   const [selectedTeams, setSelectedTeams] = useState([])
@@ -175,12 +178,15 @@ export default function Dashboard({ onOpenBackup }) {
 
   const load = useCallback(() => {
     getDashboard()
-      .then(d => {
-        if (d?.kpis) setKpis(d.kpis)
-        if (d?.pools?.length) setPools(d.pools)
-        if (d?.projects?.length) setBoard(d.projects)
+      .then(data => {
+        if (data) {
+          if (data.kpis) setKpis(data.kpis)
+          if (data.pools) setPools(data.pools)
+          if (data.projects) setBoard(data.projects)
+        }
       })
-      .catch(() => {})
+      .catch(console.error)
+      .finally(() => setLoading(false))
   }, [])
 
   useEffect(() => {
@@ -196,13 +202,22 @@ export default function Dashboard({ onOpenBackup }) {
     }
   }, [load])
 
-  // ROBUST COLUMN SORTING
+  // ROBUST COLUMN SORTING WITH PROPER NUMERIC ORDERING
   const sorted = [...board].sort((a, b) => {
     if (!sort.col) return 0
     let va = a[sort.col]
     let vb = b[sort.col]
 
-    if (sort.col === 'productQty' || sort.col === 'qty') {
+    if (sort.col === 'id') {
+      const numA = Number(a.id)
+      const numB = Number(b.id)
+      if (!isNaN(numA) && !isNaN(numB)) {
+        return sort.dir === 'asc' ? numA - numB : numB - numA
+      }
+      return sort.dir === 'asc'
+        ? String(a.id || '').localeCompare(String(b.id || ''), undefined, { numeric: true, sensitivity: 'base' })
+        : String(b.id || '').localeCompare(String(a.id || ''), undefined, { numeric: true, sensitivity: 'base' })
+    } else if (sort.col === 'productQty' || sort.col === 'qty') {
       va = a.productQty ?? a.qty ?? 0
       vb = b.productQty ?? b.qty ?? 0
     } else if (sort.col === 'mobDate') {
@@ -235,11 +250,11 @@ export default function Dashboard({ onOpenBackup }) {
       return sort.dir === 'asc' ? va - vb : vb - va
     }
 
-    const strA = String(va).toLowerCase()
-    const strB = String(vb).toLowerCase()
+    const strA = String(va)
+    const strB = String(vb)
     return sort.dir === 'asc'
-      ? strA.localeCompare(strB)
-      : strB.localeCompare(strA)
+      ? strA.localeCompare(strB, undefined, { numeric: true, sensitivity: 'base' })
+      : strB.localeCompare(strA, undefined, { numeric: true, sensitivity: 'base' })
   })
 
   const filtered = sorted.filter(

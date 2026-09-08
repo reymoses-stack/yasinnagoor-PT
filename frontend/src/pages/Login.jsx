@@ -2,43 +2,30 @@ import React, { useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 
 export default function Login() {
-  const { signIn, signUp } = useAuth()
-  const [isSignUp, setIsSignUp] = useState(false)
+  const { signIn } = useAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
   const [errorMsg, setErrorMsg] = useState('')
-  const [successMsg, setSuccessMsg] = useState('')
 
   const handleSubmit = async (e) => {
     e.preventDefault()
     setErrorMsg('')
-    setSuccessMsg('')
     setLoading(true)
 
     try {
       if (!email.trim() || !password.trim()) {
         throw new Error('Please enter both email and password.')
       }
-
-      if (isSignUp) {
-        const data = await signUp(email.trim(), password)
-        if (data?.user && !data?.session) {
-          setSuccessMsg(
-            'Account created! If email confirmation is enabled in Supabase, please check your inbox.'
-          )
-        } else {
-          setSuccessMsg('Account created successfully! Logging you in...')
-        }
-      } else {
-        await signIn(email.trim(), password)
-      }
+      await signIn(email.trim(), password)
     } catch (err) {
       console.error('Auth error:', err)
       let msg = err.message || 'Authentication failed. Please check your credentials.'
       if (msg.includes('Invalid login credentials')) {
-        msg = 'Invalid email or password. If you are new, click "Create an Account" below.'
+        msg = 'Invalid email or password. Access is restricted to pre-approved administrator accounts.'
+      } else if (msg.includes('Email not confirmed')) {
+        msg = 'Your email has not been confirmed yet in the Supabase Dashboard.'
       }
       setErrorMsg(msg)
     } finally {
@@ -72,30 +59,9 @@ export default function Login() {
           </p>
         </div>
 
-        {/* Form Mode Selector Tabs */}
-        <div className="login-mode-tabs">
-          <button
-            type="button"
-            className={`login-mode-btn ${!isSignUp ? 'active' : ''}`}
-            onClick={() => {
-              setIsSignUp(false)
-              setErrorMsg('')
-              setSuccessMsg('')
-            }}
-          >
-            Sign In
-          </button>
-          <button
-            type="button"
-            className={`login-mode-btn ${isSignUp ? 'active' : ''}`}
-            onClick={() => {
-              setIsSignUp(true)
-              setErrorMsg('')
-              setSuccessMsg('')
-            }}
-          >
-            Create Account
-          </button>
+        {/* Security Badge */}
+        <div className="login-auth-lock-badge">
+          <span>🔒 Authorized Personnel Only</span>
         </div>
 
         {/* Alerts */}
@@ -105,14 +71,8 @@ export default function Login() {
             <span>{errorMsg}</span>
           </div>
         )}
-        {successMsg && (
-          <div className="login-alert login-alert-success">
-            <span>✓</span>
-            <span>{successMsg}</span>
-          </div>
-        )}
 
-        {/* Form */}
+        {/* Sign In Form */}
         <form onSubmit={handleSubmit} className="login-form">
           <div className="login-input-group">
             <label className="login-label">Email Address</label>
@@ -141,7 +101,7 @@ export default function Login() {
                 placeholder="••••••••"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                autoComplete={isSignUp ? 'new-password' : 'current-password'}
+                autoComplete="current-password"
               />
               <button
                 type="button"
@@ -160,9 +120,7 @@ export default function Login() {
             className="login-submit-btn"
           >
             {loading ? (
-              <span className="login-loading-spinner">Processing...</span>
-            ) : isSignUp ? (
-              'Create Account & Sign In'
+              <span className="login-loading-spinner">Signing in...</span>
             ) : (
               'Sign In to Dashboard →'
             )}
@@ -171,8 +129,8 @@ export default function Login() {
 
         <div className="login-footer-info">
           <p>
-            🔒 Protected by <strong>Supabase Cloud Database &amp; Authentication</strong>.
-            All project schedules and team allocations are synchronized securely in real time.
+            🛡️ <strong>Restricted Enterprise Access</strong><br />
+            New user accounts can only be created by an authorized Administrator in the Supabase management console.
           </p>
         </div>
       </div>

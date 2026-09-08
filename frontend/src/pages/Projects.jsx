@@ -108,7 +108,7 @@ function fmtDate(d) {
 
 export default function Projects({ onOpenBackup }) {
   const [rows, setRows] = useState(getInitialProjects)
-  const [sort, setSort] = useState({ col: null, dir: 'asc' })
+  const [sort, setSort] = useState({ col: 'id', dir: 'asc' })
   const [search, setSearch] = useState('')
   const [filterStatus, setFilterStatus] = useState('')
   const [showForm, setShowForm] = useState(false)

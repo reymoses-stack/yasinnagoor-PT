@@ -13,20 +13,20 @@ import {
 import { INITIAL_DATA } from '../seedData'
 
 const COLS = [
-  { key: 'id', label: 'S/NO', align: 'center' },
-  { key: 'empId', label: 'Employee ID', align: 'left' },
-  { key: 'nameEn', label: 'Name (EN)', align: 'left' },
-  { key: 'nameAr', label: 'Name (AR)', align: 'right' },
-  { key: 'project', label: 'Assigned Project', align: 'left' },
-  { key: 'team', label: 'Teams', align: 'center' },
-  { key: 'jobCat', label: 'Job Category', align: 'left' },
-  { key: 'vehicleType', label: 'Vehicle Type', align: 'left' },
-  { key: 'plate', label: 'Vehicle Plate', align: 'left' },
-  { key: 'brand', label: 'Vehicle Brand', align: 'left' },
-  { key: 'secExpiry', label: 'SEC ID Expiry Date', align: 'center' },
-  { key: 'vehicleStatus', label: 'Status Vehicle', align: 'center' },
-  { key: 'gatePass', label: 'Gate Pass', align: 'center' },
-  { key: 'toolsBox', label: 'Tools Box', align: 'left' },
+  { key: 'id', label: 'S.No.', align: 'center' },
+  { key: 'empId', label: 'EMP ID', align: 'center' },
+  { key: 'nameEn', label: 'NAME (EN)', align: 'left' },
+  { key: 'nameAr', label: 'NAME (AR)', align: 'left' },
+  { key: 'jobCat', label: 'DESIGNATION', align: 'left' },
+  { key: 'team', label: 'TEAM', align: 'center' },
+  { key: 'project', label: 'CATEGORY / PROJECT', align: 'left' },
+  { key: 'vehicleType', label: 'VEHICLE TYPE', align: 'center' },
+  { key: 'plate', label: 'PLATE NO', align: 'center' },
+  { key: 'brand', label: 'BRAND', align: 'center' },
+  { key: 'secExpiry', label: 'SEC EXPIRY', align: 'center' },
+  { key: 'vehicleStatus', label: 'VEHICLE STATUS', align: 'center' },
+  { key: 'gatePass', label: 'GATE PASS', align: 'center' },
+  { key: 'toolsBox', label: 'TOOLS BOX', align: 'center' },
 ]
 
 const EMPTY = {
@@ -54,7 +54,7 @@ export default function Workforce({ onOpenBackup }) {
   const [fProject, setFProject] = useState('')
   const [fTeam, setFTeam] = useState('')
   const [fType, setFType] = useState('')
-  const [sort, setSort] = useState({ col: null, dir: 'asc' })
+  const [sort, setSort] = useState({ col: 'id', dir: 'asc' })
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState(EMPTY)
   const [editId, setEditId] = useState(null)
@@ -88,15 +88,15 @@ export default function Workforce({ onOpenBackup }) {
 
   // Filter
   const filtered = rows.filter(e => {
-    const isNeed =
-      e.empId === 'Need' || e.nameEn?.toLowerCase().startsWith('need')
-    if (fType === 'actual' && isNeed) return false
-    if (fType === 'need' && !isNeed) return false
     if (fProject && e.project !== fProject) return false
     if (fTeam) {
       const empTeam = (e.team || '').replace(/team/i, '').trim().toUpperCase()
       if (empTeam !== fTeam.toUpperCase()) return false
     }
+    const isNeed =
+      e.empId === 'Need' || e.nameEn?.toLowerCase().startsWith('need')
+    if (fType === 'actual' && isNeed) return false
+    if (fType === 'need' && !isNeed) return false
     if (search) {
       const q = search.toLowerCase()
       const matches =
@@ -112,24 +112,29 @@ export default function Workforce({ onOpenBackup }) {
   // Sort
   const sorted = [...filtered].sort((a, b) => {
     if (!sort.col) return 0
-    let va = a[sort.col] ?? '',
-      vb = b[sort.col] ?? ''
-    if (!isNaN(+va) && !isNaN(+vb) && va !== '' && vb !== '') {
-      va = +va
-      vb = +vb
-    } else {
-      va = String(va).toLowerCase()
-      vb = String(vb).toLowerCase()
+    let va = a[sort.col] ?? ''
+    let vb = b[sort.col] ?? ''
+
+    if (sort.col === 'id') {
+      const numA = Number(a.id)
+      const numB = Number(b.id)
+      if (!isNaN(numA) && !isNaN(numB)) {
+        return sort.dir === 'asc' ? numA - numB : numB - numA
+      }
+      return sort.dir === 'asc'
+        ? String(a.id || '').localeCompare(String(b.id || ''), undefined, { numeric: true, sensitivity: 'base' })
+        : String(b.id || '').localeCompare(String(a.id || ''), undefined, { numeric: true, sensitivity: 'base' })
     }
-    return va < vb
-      ? sort.dir === 'asc'
-        ? -1
-        : 1
-      : va > vb
-      ? sort.dir === 'asc'
-        ? 1
-        : -1
-      : 0
+
+    if (!isNaN(+va) && !isNaN(+vb) && va !== '' && vb !== '') {
+      return sort.dir === 'asc' ? +va - +vb : +vb - +va
+    }
+
+    const strA = String(va)
+    const strB = String(vb)
+    return sort.dir === 'asc'
+      ? strA.localeCompare(strB, undefined, { numeric: true, sensitivity: 'base' })
+      : strB.localeCompare(strA, undefined, { numeric: true, sensitivity: 'base' })
   })
 
   const toggleSort = col =>

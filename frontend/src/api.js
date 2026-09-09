@@ -257,15 +257,15 @@ export function getBusyTeamsForCategoryAndDates(category, excludeId, startDate, 
   const overlappingProjects = []
   const allCat = getAllTeamsForCategory(category)
   if (!allCat || allCat.length === 0) {
-    return { busyMap, overlappingProjects, available: [], isOverlapped: false }
+    return { busyMap, overlappingProjects, available: [], isOverlapped: false, allTeams: [] }
   }
 
   const s = (startDate || '').trim()
   const e = (endDate || '').trim()
 
-  // If no start date is provided (pending project or clearing dates), no overlap exists and all category teams are available
+  // If no start date is provided, no date overlap exists and all category teams are available
   if (!s) {
-    return { busyMap, overlappingProjects, available: allCat, isOverlapped: false }
+    return { busyMap, overlappingProjects, available: allCat, isOverlapped: false, allTeams: allCat }
   }
 
   const todayStr = new Date().toISOString().split('T')[0]
@@ -280,17 +280,7 @@ export function getBusyTeamsForCategoryAndDates(category, excludeId, startDate, 
     return Boolean(otherStart || other.status === 'Active' || other.team)
   })
 
-  // Sort other active projects chronologically by start date
-  const sortedOthers = [...otherProjects].sort((a, b) => {
-    const sa = (a.actStart || a.expStart || '9999-12-31').trim()
-    const sb = (b.actStart || b.expStart || '9999-12-31').trim()
-    if (sa !== sb) return sa.localeCompare(sb)
-    return (a.id || 0) - (b.id || 0)
-  })
-
-  const claimedTeams = new Set()
-
-  sortedOthers.forEach(other => {
+  otherProjects.forEach(other => {
     const oStart = (other.actStart || other.expStart || '').trim()
     const oEnd = (other.actEnd || other.expEnd || '').trim()
 
@@ -301,31 +291,15 @@ export function getBusyTeamsForCategoryAndDates(category, excludeId, startDate, 
         .filter(Boolean)
         .filter(t => allCat.includes(t))
 
-      let assigned = []
-      if (explicit.length === 1 && !claimedTeams.has(explicit[0])) {
-        // If other project had 1 specific explicit team assigned that is still available
-        assigned = explicit
-      } else if (explicit.length > 1) {
-        // If other project had multiple teams (e.g. holding whole category pool because it was alone),
-        // it claims 1 base team in concurrent overlap, releasing the rest for other projects!
-        const freeFromExplicit = explicit.filter(t => !claimedTeams.has(t))
-        assigned = freeFromExplicit.length > 0 ? [freeFromExplicit[0]] : []
-      } else {
-        // In a shared concurrent window, each active project claims 1 team in alphabetical order
-        const freeForOther = allCat.filter(t => !claimedTeams.has(t))
-        assigned = freeForOther.length > 0 ? [freeForOther[0]] : []
-      }
-
-      if (assigned.length > 0) {
+      if (explicit.length > 0) {
         overlappingProjects.push({
           id: other.id,
           jobCard: other.jobCard || `Project #${other.id}`,
           startDate: oStart,
           endDate: oEnd,
-          teams: assigned,
+          teams: explicit,
         })
-        assigned.forEach(t => {
-          claimedTeams.add(t)
+        explicit.forEach(t => {
           busyMap[t] = {
             jobCard: other.jobCard || `Project #${other.id}`,
             startDate: oStart,
@@ -337,10 +311,8 @@ export function getBusyTeamsForCategoryAndDates(category, excludeId, startDate, 
     }
   })
 
-  const available = allCat.filter(t => !busyMap[t]).sort()
-  const isOverlapped = Boolean(s && overlappingProjects.length > 0 && available.length === 0)
-
-  return { busyMap, overlappingProjects, available, isOverlapped, allTeams: allCat }
+  const available = allCat.filter(t => !busyMap[t]).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+  return { busyMap, overlappingProjects, available, isOverlapped: false, allTeams: allCat }
 }
 
 // Client-side LocalStorage Persistence Keys
@@ -522,177 +494,13 @@ export function computeDashboardFromData(prjs = [], emps = []) {
 
   const todayStr = new Date().toISOString().split('T')[0]
 
-  // 1. Group active and planned projects by category
-  const catRelevantProjects = {}
-  const explicitReservationsByCat = {}
-
-  Object.keys(catTeams).forEach(cat => {
-    explicitReservationsByCat[cat] = new Map()
-    catRelevantProjects[cat] = []
-  })
-
-  prjs.forEach(p => {
-    const cat = getCategory(p.project)
-    const s = (p.actStart || p.expStart || '').trim()
-    const actEnd = (p.actEnd || '').trim()
-    const isCompleted = p.status === 'Completed' || (actEnd && actEnd < todayStr)
-    const explicit = (p.team || '')
-      .split(',')
-      .map(t => t.replace(/team/i, '').trim().toUpperCase())
-      .filter(Boolean)
-
-    // Only active (non-completed) projects claim live fleet resources
-    if (!isCompleted && (s || explicit.length > 0)) {
-      if (!catRelevantProjects[cat]) catRelevantProjects[cat] = []
-      catRelevantProjects[cat].push(p)
-
-      if (explicit.length > 0 && explicitReservationsByCat[cat]) {
-        explicit.forEach(t => {
-          explicitReservationsByCat[cat].set(t, p.id)
-        })
-      }
-    }
-  })
-
-  // 2. Pre-calculate assigned teams for active jobs with date overlap checking
-  const projectAssignedTeams = {}
-  const projectOverlapInfo = {}
+  // Track used teams by category from projects with explicit team assignments
   const usedTeams = {}
   Object.keys(catTeams).forEach(cat => {
     usedTeams[cat] = new Map()
   })
 
-  Object.entries(catRelevantProjects).forEach(([cat, activeList]) => {
-    const allCatTeams = Array.from(catTeams[cat] || []).sort()
-    if (!allCatTeams.length || !activeList.length) {
-      activeList.forEach(p => {
-        const explicit = (p.team || '')
-          .split(',')
-          .map(t => t.replace(/team/i, '').trim().toUpperCase())
-          .filter(Boolean)
-        projectAssignedTeams[p.id] = explicit
-        projectOverlapInfo[p.id] = { isOverlapped: false, conflictingProjects: [] }
-      })
-      return
-    }
-
-    // Sort chronologically by start date, keeping earlier projects priority
-    const sortedList = [...activeList].sort((a, b) => {
-      const sa = (a.actStart || a.expStart || '9999-12-31').trim()
-      const sb = (b.actStart || b.expStart || '9999-12-31').trim()
-      if (sa !== sb) return sa.localeCompare(sb)
-      return (a.id || 0) - (b.id || 0)
-    })
-
-    const allocatedTimeline = []
-
-    sortedList.forEach(p => {
-      const s = (p.actStart || p.expStart || '').trim()
-      const e = (p.actEnd || p.expEnd || '').trim()
-      const explicit = (p.team || '')
-        .split(',')
-        .map(t => t.replace(/team/i, '').trim().toUpperCase())
-        .filter(Boolean)
-
-      // Find all overlapping already-allocated projects in this category
-      const busyTeamsDuringWindow = new Set()
-      const conflictingProjects = []
-
-      allocatedTimeline.forEach(prev => {
-        if (checkDateOverlap(s, e, prev.startDate, prev.endDate)) {
-          conflictingProjects.push(prev)
-          // Each prior overlapping project locks its claimed essential base team(s)
-          ;(prev.claimedTeams || []).forEach(t => busyTeamsDuringWindow.add(t))
-        }
-      })
-
-      const availableTeams = allCatTeams.filter(t => !busyTeamsDuringWindow.has(t))
-
-      if (explicit.length > 0) {
-        // User explicitly chose team(s) for this project (manual assignment/override)
-        const validExplicit = explicit.filter(t => allCatTeams.includes(t))
-        const hasDirectConflict = validExplicit.some(t => busyTeamsDuringWindow.has(t))
-        projectAssignedTeams[p.id] = validExplicit
-        projectOverlapInfo[p.id] = {
-          isOverlapped: false,
-          hasConflict: hasDirectConflict,
-          conflictingProjects,
-        }
-        validExplicit.forEach(t => usedTeams[cat]?.set(t, p.jobCard))
-
-        // If it was given all category teams because it was created alone, lock 1 base team so other projects can take remaining teams
-        const claimed = (validExplicit.length >= allCatTeams.length) ? [validExplicit[0]] : validExplicit
-
-        // Release these explicit teams from any prior project that was holding multiple teams
-        conflictingProjects.forEach(prev => {
-          if (projectAssignedTeams[prev.id] && projectAssignedTeams[prev.id].length > 1) {
-            projectAssignedTeams[prev.id] = projectAssignedTeams[prev.id].filter(
-              t => !validExplicit.includes(t)
-            )
-          }
-        })
-
-        allocatedTimeline.push({
-          id: p.id,
-          jobCard: p.jobCard || `Project #${p.id}`,
-          startDate: s,
-          endDate: e,
-          claimedTeams: claimed,
-          teams: validExplicit,
-        })
-      } else if (availableTeams.length > 0) {
-        if (conflictingProjects.length === 0) {
-          // Sole active project running in its window:
-          // displays all available teams in category, locks 1 base team
-          const chosen = availableTeams
-          projectAssignedTeams[p.id] = chosen
-          projectOverlapInfo[p.id] = { isOverlapped: false, conflictingProjects: [] }
-          chosen.forEach(t => usedTeams[cat]?.set(t, p.jobCard))
-          allocatedTimeline.push({
-            id: p.id,
-            jobCard: p.jobCard || `Project #${p.id}`,
-            startDate: s,
-            endDate: e,
-            claimedTeams: [availableTeams[0]],
-            teams: chosen,
-          })
-        } else {
-          // Concurrent project: takes 1 dedicated team in alphabetical order from available pool
-          const chosen = [availableTeams[0]]
-          projectAssignedTeams[p.id] = chosen
-          projectOverlapInfo[p.id] = { isOverlapped: false, conflictingProjects: [] }
-          chosen.forEach(t => usedTeams[cat]?.set(t, p.jobCard))
-
-          // Update prior overlapping projects that were alone and holding multiple teams to release this team
-          conflictingProjects.forEach(prev => {
-            if (projectAssignedTeams[prev.id] && projectAssignedTeams[prev.id].length > 1) {
-              projectAssignedTeams[prev.id] = projectAssignedTeams[prev.id].filter(
-                t => t !== chosen[0]
-              )
-            }
-          })
-
-          allocatedTimeline.push({
-            id: p.id,
-            jobCard: p.jobCard || `Project #${p.id}`,
-            startDate: s,
-            endDate: e,
-            claimedTeams: chosen,
-            teams: chosen,
-          })
-        }
-      } else {
-        // No teams available and no manual team assigned: marked as overlapped
-        projectAssignedTeams[p.id] = []
-        projectOverlapInfo[p.id] = {
-          isOverlapped: true,
-          conflictingProjects,
-        }
-      }
-    })
-  })
-
-  // 3. Build detailed project rows preserving team assignments for Completed, Active, and Scheduled projects
+  // Build detailed project rows preserving explicit team assignments for projects
   const details = prjs.map(p => {
     const cat = getCategory(p.project)
     const s = (p.actStart || p.expStart || '').trim()
@@ -709,25 +517,23 @@ export function computeDashboardFromData(prjs = [], emps = []) {
       status = 'Pending'
     }
 
-    const computedMob = p.mobDate || calc5DaysPrior(s)
-    const allTeams = Array.from(catTeams[cat] || getAllTeamsForCategory(cat)).sort()
+    const computedMob = p.mobDate || (s ? calc5DaysPrior(s) : '')
+    const allTeams = Array.from(catTeams[cat] || getAllTeamsForCategory(cat)).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+
+    // Explicit teams chosen by user
     const explicit = (p.team || '')
       .split(',')
       .map(t => t.replace(/team/i, '').trim().toUpperCase())
       .filter(Boolean)
+      .filter(t => allTeams.includes(t))
 
-    const isOverlapped = Boolean(projectOverlapInfo[p.id]?.isOverlapped)
-    const overlapConflicts = projectOverlapInfo[p.id]?.conflictingProjects || []
+    const assignedTeams = explicit
 
-    // Preserve assigned teams for Completed and Active projects only if teams exist for category and not overlapped
-    let assignedTeams = []
-    if (projectAssignedTeams[p.id] !== undefined) {
-      assignedTeams = projectAssignedTeams[p.id]
-    } else if (!isOverlapped && explicit.length > 0) {
-      assignedTeams = explicit
-    } else if (!isOverlapped && (status === 'Completed' || status === 'Active') && allTeams.length > 0) {
-      // Historical/default assigned team for completed/active projects
-      assignedTeams = [allTeams[0]]
+    // If project is active and has assigned teams, claim those teams in fleet view
+    if (status === 'Active' && assignedTeams.length > 0) {
+      assignedTeams.forEach(t => {
+        usedTeams[cat]?.set(t, p.jobCard || `Project #${p.id}`)
+      })
     }
 
     let assignedEmps = []
@@ -765,8 +571,8 @@ export function computeDashboardFromData(prjs = [], emps = []) {
       assignedTeams,
       availableTeams: availAfter,
       allCategoryTeams: allTeams,
-      isOverlapped,
-      overlapConflicts,
+      isOverlapped: false,
+      overlapConflicts: [],
       assignedHeadcount: assignedEmps.length || (assignedTeams.length > 0 && status !== 'Pending' ? 11 * assignedTeams.length : 0),
       assignedEmps,
       productQty: p.qty ?? 0,

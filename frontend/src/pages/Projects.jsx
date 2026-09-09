@@ -214,28 +214,13 @@ export default function Projects({ onOpenBackup }) {
   }
 
   const openEdit = p => {
-    const cat = p.category || getCategory(p.project)
-    const s = (p.actStart || p.expStart || '').trim()
-    const e = (p.actEnd || p.expEnd || '').trim()
-    const { busyMap, overlappingProjects, available, isOverlapped } =
-      getBusyTeamsForCategoryAndDates(cat, p.id, s, e, rows)
-
     const explicit = (p.team || '')
       .split(',')
       .map(t => t.replace(/team/i, '').trim().toUpperCase())
       .filter(Boolean)
 
-    let initialTeams = []
-    if (explicit.length > 0) {
-      // Always preserve user's assigned team(s) when opening edit modal
-      initialTeams = explicit
-    } else if (p.assignedTeams && p.assignedTeams.length > 0) {
-      initialTeams = p.assignedTeams
-    } else if (s && available.length > 0) {
-      const isFirst = Object.keys(busyMap).length === 0
-      initialTeams = isFirst ? available : [available[0]]
-    }
-
+    const initialTeams = explicit
+    const s = (p.actStart || p.expStart || '').trim()
     const currentMob = p.mobDate || (s ? calc5DaysPrior(s) : '')
 
     setForm({
@@ -265,71 +250,29 @@ export default function Projects({ onOpenBackup }) {
     const isStart = field === 'actStart' || field === 'expStart'
     const newMob = isStart ? calc5DaysPrior(val) : null
 
-    const updatedForm = {
-      ...form,
+    setForm(f => ({
+      ...f,
       [field]: val,
       ...(newMob !== null ? { mobDate: newMob } : {}),
-    }
-
-    const cat = getCategory(updatedForm.project)
-    const s = (updatedForm.actStart || updatedForm.expStart || '').trim()
-    const e = (updatedForm.actEnd || updatedForm.expEnd || '').trim()
-
-    const { busyMap, available, isOverlapped } =
-      getBusyTeamsForCategoryAndDates(cat, editId, s, e, rows)
-
-    // If no teams were selected yet, auto-suggest the first free team
-    let nextTeams = selectedTeams
-    if (selectedTeams.length === 0 && s && available.length > 0) {
-      const isFirst = Object.keys(busyMap).length === 0
-      nextTeams = isFirst ? available : [available[0]]
-    }
-
-    updatedForm.team = nextTeams.join(', ')
-    setSelectedTeams(nextTeams)
-    setForm(updatedForm)
+    }))
   }
 
   const handleProjectChange = val => {
-    const updatedForm = { ...form, project: val }
     const cat = getCategory(val)
-    const s = (updatedForm.actStart || updatedForm.expStart || '').trim()
-    const e = (updatedForm.actEnd || updatedForm.expEnd || '').trim()
-
-    const { busyMap, available, isOverlapped } =
-      getBusyTeamsForCategoryAndDates(cat, editId, s, e, rows)
-
-    let nextTeams = selectedTeams.filter(t => getAllTeamsForCategory(cat).includes(t))
-    if (nextTeams.length === 0 && s && available.length > 0) {
-      const isFirst = Object.keys(busyMap).length === 0
-      nextTeams = isFirst ? available : [available[0]]
-    }
-
-    updatedForm.team = nextTeams.join(', ')
+    const validTeams = getAllTeamsForCategory(cat)
+    const nextTeams = selectedTeams.filter(t => validTeams.includes(t))
     setSelectedTeams(nextTeams)
-    setForm(updatedForm)
-  }
-
-  const autoSuggestTeam = () => {
-    const cat = getCategory(form.project)
-    const s = (form.actStart || form.expStart || '').trim()
-    const e = (form.actEnd || form.expEnd || '').trim()
-    const { busyMap, available } = getBusyTeamsForCategoryAndDates(cat, editId, s, e, rows)
-    if (available.length > 0) {
-      const isFirst = Object.keys(busyMap).length === 0
-      const suggested = isFirst ? available : [available[0]]
-      setSelectedTeams(suggested)
-      setForm(f => ({ ...f, team: suggested.join(', ') }))
-    } else {
-      setSelectedTeams([])
-      setForm(f => ({ ...f, team: '' }))
-    }
+    setForm(f => ({
+      ...f,
+      project: val,
+      team: nextTeams.join(', '),
+    }))
   }
 
   const toggleTeamSelection = t => {
     const next = selectedTeams.includes(t)
       ? selectedTeams.filter(x => x !== t)
-      : [...selectedTeams, t].sort()
+      : [...selectedTeams, t].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
     setSelectedTeams(next)
     setForm(f => ({ ...f, team: next.join(', ') }))
   }
@@ -372,14 +315,8 @@ export default function Projects({ onOpenBackup }) {
   const {
     busyMap: busyTeamsMap,
     overlappingProjects,
-    available: availableTeamsForEditing,
     isOverlapped,
   } = getBusyTeamsForCategoryAndDates(currentCategory, editId, formStartDate, formEndDate, rows)
-  const isFirstProjectInCategory =
-    !isOverlapped &&
-    Boolean(formStartDate) &&
-    Object.keys(busyTeamsMap).length === 0 &&
-    availableTeamsForEditing.length > 0
 
   return (
     <div className="page">
@@ -686,49 +623,21 @@ export default function Projects({ onOpenBackup }) {
                   >
                     👥 Team Allocation ({currentCategory})
                   </strong>
-                  {isOverlapped ? (
-                    <span
-                      style={{
-                        fontSize: '11px',
-                        background: '#fee2e2',
-                        color: '#991b1b',
-                        padding: '2px 9px',
-                        borderRadius: '12px',
-                        fontWeight: 700,
-                        border: '1px solid #fecdd3',
-                      }}
-                    >
-                      ⚠️ Dates Overlapped (No Team Assigned)
-                    </span>
-                  ) : isFirstProjectInCategory ? (
-                    <span
-                      style={{
-                        fontSize: '11px',
-                        background: '#dcfce7',
-                        color: '#15803d',
-                        padding: '2px 9px',
-                        borderRadius: '12px',
-                        fontWeight: 700,
-                        border: '1px solid #bbf7d0',
-                      }}
-                    >
-                      🌟 1st Project (All teams auto-assigned on Start Date)
-                    </span>
-                  ) : (
-                    <span
-                      style={{
-                        fontSize: '11px',
-                        background: '#f8fafc',
-                        color: '#475569',
-                        padding: '2px 9px',
-                        borderRadius: '12px',
-                        fontWeight: 600,
-                        border: '1px solid #cbd5e1',
-                      }}
-                    >
-                      💡 Editable Team Selection (Click any team to assign/change)
-                    </span>
-                  )}
+                  <span
+                    style={{
+                      fontSize: '11px',
+                      background: '#f8fafc',
+                      color: selectedTeams.length > 0 ? '#1a6fc4' : '#64748b',
+                      padding: '2px 9px',
+                      borderRadius: '12px',
+                      fontWeight: 600,
+                      border: '1px solid #cbd5e1',
+                    }}
+                  >
+                    {selectedTeams.length > 0
+                      ? `${selectedTeams.length} Team${selectedTeams.length === 1 ? '' : 's'} Selected (${selectedTeams.map(t => `Team ${t}`).join(', ')})`
+                      : 'No Team Assigned (Standby in Office)'}
+                  </span>
                 </div>
 
                 <div
@@ -747,52 +656,30 @@ export default function Projects({ onOpenBackup }) {
                       color: '#64748b',
                     }}
                   >
-                    Click any team below to assign or change. Free teams are suggested; in-use teams show current project overlap.
+                    Click any team below to assign or unassign. Free teams are marked available; overlapping projects indicate schedule conflicts.
                   </span>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  {selectedTeams.length > 0 && (
                     <button
                       type="button"
-                      onClick={autoSuggestTeam}
-                      title="Automatically find and assign the best free available team"
+                      onClick={() => {
+                        setSelectedTeams([])
+                        setForm(f => ({ ...f, team: '' }))
+                      }}
+                      title="Clear team selection"
                       style={{
-                        padding: '4px 10px',
+                        padding: '4px 8px',
                         fontSize: '11px',
-                        fontWeight: 600,
+                        fontWeight: 500,
                         borderRadius: '6px',
-                        border: '1px solid #93c5fd',
-                        background: '#eff6ff',
-                        color: '#1d4ed8',
+                        border: '1px solid #e2e8f0',
+                        background: '#f8fafc',
+                        color: '#64748b',
                         cursor: 'pointer',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '4px',
                       }}
                     >
-                      <span>⚡</span> Auto-Assign Free Team
+                      ✕ Clear Selection
                     </button>
-                    {selectedTeams.length > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSelectedTeams([])
-                          setForm(f => ({ ...f, team: '' }))
-                        }}
-                        title="Clear team selection"
-                        style={{
-                          padding: '4px 8px',
-                          fontSize: '11px',
-                          fontWeight: 500,
-                          borderRadius: '6px',
-                          border: '1px solid #e2e8f0',
-                          background: '#f8fafc',
-                          color: '#64748b',
-                          cursor: 'pointer',
-                        }}
-                      >
-                        ✕ Clear
-                      </button>
-                    )}
-                  </div>
+                  )}
                 </div>
 
                 {/* Overlap Schedule Info */}

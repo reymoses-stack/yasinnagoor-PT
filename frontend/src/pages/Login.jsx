@@ -35,54 +35,58 @@ export default function Login() {
 
   return (
     <div className="login-page-container">
-      {/* Background Decorative Glows */}
+      {/* Dynamic Background Aurora Glows */}
       <div className="login-bg-glow login-bg-glow-1" />
       <div className="login-bg-glow login-bg-glow-2" />
+      <div className="login-bg-glow login-bg-glow-3" />
 
+      {/* Main Luxury Glass Card */}
       <div className="login-card">
         {/* Brand Header */}
         <div className="login-brand-header">
-          <div className="login-logo-box">
-            <img
-              src="/PT_Logo.png"
-              alt="Pioneers Technical Logo"
-              className="login-logo-img"
-              onError={(e) => {
-                e.target.onerror = null
-                e.target.src = 'https://pt-tgc.com/wp-content/uploads/2022/03/PT_Logo.png'
-              }}
-            />
+          <div className="login-logo-wrapper">
+            <div className="login-logo-glow" />
+            <div className="login-logo-box">
+              <img
+                src="/PT_Logo.png"
+                alt="Pioneers Technical Logo"
+                className="login-logo-img"
+                onError={(e) => {
+                  e.target.onerror = null
+                  e.target.src = 'https://pt-tgc.com/wp-content/uploads/2022/03/PT_Logo.png'
+                }}
+              />
+            </div>
           </div>
-          <h1 className="login-title">Pioneers Technical</h1>
-          <p className="login-subtitle">
-            Operations &amp; Team Management Portal
-          </p>
-        </div>
 
-        {/* Security Badge */}
-        <div className="login-auth-lock-badge">
-          <span>🔒 Authorized Personnel Only</span>
+          <h1 className="login-title">Pioneers Technical</h1>
+          <div className="login-badge-tag">
+            <span className="login-badge-dot" />
+            <span>Yasin Nagoor Project Management Portal</span>
+          </div>
         </div>
 
         {/* Alerts */}
         {errorMsg && (
           <div className="login-alert login-alert-error">
-            <span>⚠️</span>
-            <span>{errorMsg}</span>
+            <span className="alert-icon">⚠️</span>
+            <span className="alert-text">{errorMsg}</span>
           </div>
         )}
 
         {/* Sign In Form */}
         <form onSubmit={handleSubmit} className="login-form">
           <div className="login-input-group">
-            <label className="login-label">Email Address</label>
+            <label className="login-label">
+              <span>Email Address</span>
+            </label>
             <div className="login-input-wrapper">
               <span className="login-input-icon">✉️</span>
               <input
                 type="email"
                 required
                 className="login-input"
-                placeholder="admin@pt-tgc.com"
+                placeholder="name@pt-tgc.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 autoComplete="email"
@@ -91,14 +95,18 @@ export default function Login() {
           </div>
 
           <div className="login-input-group">
-            <label className="login-label">Password</label>
+            <div className="login-label-row">
+              <label className="login-label">
+                <span>Password</span>
+              </label>
+            </div>
             <div className="login-input-wrapper">
               <span className="login-input-icon">🔒</span>
               <input
                 type={showPassword ? 'text' : 'password'}
                 required
                 className="login-input"
-                placeholder="••••••••"
+                placeholder="••••••••••••"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 autoComplete="current-password"
@@ -120,15 +128,29 @@ export default function Login() {
             className="login-submit-btn"
           >
             {loading ? (
-              <span className="login-loading-spinner">Signing in...</span>
+              <span className="login-loading-spinner">
+                <span className="spinner-dot" />
+                <span>Authenticating...</span>
+              </span>
             ) : (
-              'Sign In to Dashboard →'
+              <span className="btn-content-flex">
+                <span>Sign In to Dashboard</span>
+                <span className="btn-arrow">→</span>
+              </span>
             )}
           </button>
         </form>
+
+        {/* Security & Live Operational Footer */}
+        <div className="login-card-footer">
+          <div className="login-security-pill">
+            <span className="security-dot" />
+            <span>Secure 256-Bit Encrypted Portal</span>
+          </div>
+        </div>
       </div>
 
-      {/* Powered by The Nexus Lab floating badge */}
+      {/* Powered by The Nexus Lab Floating Badge */}
       <a
         href="https://www.thenexuslab.in"
         target="_blank"

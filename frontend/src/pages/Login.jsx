@@ -23,9 +23,9 @@ export default function Login() {
       console.error('Auth error:', err)
       let msg = err.message || 'Authentication failed. Please check your credentials.'
       if (msg.includes('Invalid login credentials')) {
-        msg = 'Invalid email or password. Access is restricted to pre-approved administrator accounts.'
+        msg = 'Invalid email or password. Please check your credentials and try again.'
       } else if (msg.includes('Email not confirmed')) {
-        msg = 'Your email has not been confirmed yet in the Supabase Dashboard.'
+        msg = 'Your email has not been confirmed yet.'
       }
       setErrorMsg(msg)
     } finally {
@@ -126,13 +126,6 @@ export default function Login() {
             )}
           </button>
         </form>
-
-        <div className="login-footer-info">
-          <p>
-            🛡️ <strong>Restricted Enterprise Access</strong><br />
-            New user accounts can only be created by an authorized Administrator in the Supabase management console.
-          </p>
-        </div>
       </div>
 
       {/* Powered by The Nexus Lab floating badge */}

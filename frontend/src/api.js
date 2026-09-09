@@ -377,7 +377,7 @@ let fallbackEmployees = getStoredEmployees()
 function mapProjectRow(p) {
   if (!p) return null
   const jc = p.job_card || p.jobCard || ''
-  const prj = jc === 'JC-2026-008' ? 'Oil Spill' : (p.project || '')
+  const prj = p.project || (jc === 'JC-2026-008' ? 'Oil Spill' : '')
   return {
     id: p.id,
     jobCard: jc,
@@ -403,7 +403,7 @@ function mapProjectRow(p) {
 function mapProjectToDb(p) {
   const s = p.actStart || p.expStart || ''
   const jc = p.jobCard || p.job_card || ''
-  const prj = jc === 'JC-2026-008' ? 'Oil Spill' : (p.project || '')
+  const prj = p.project || (jc === 'JC-2026-008' ? 'Oil Spill' : '')
   return {
     id: String(p.id),
     job_card: jc,
